@@ -1,0 +1,40 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
+# Dependencies (not currently used, pre-empt)
+Pods/
+Carthage/Build/
+
+# Local Claude context
+claude.local.md
+CLAUDE.local.md
+.claude/settings.local.json
+
+# whisper.cpp models and binaries (fetched/built locally)
+models/
+*.bin
+*.gguf
+whisper-cli
+libwhisper.a
+libwhisper.dylib
