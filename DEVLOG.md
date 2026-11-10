@@ -107,3 +107,30 @@ Each step is a working, demo-able increment.
 1. Default hotkey — `⌃⌥Space` acceptable, or preferred alternative?
 2. First-run model acquisition — auto-download `small.en`, or require the user to place a model file manually?
 3. OpenAI API key — available for testing, or deferred?
+
+---
+
+## Progress
+
+### 2026-11-09 / 2026-11-10 — Phase 0 complete, Phase 1 partial
+
+Repo scaffolded, Xcode project created and cleaned, source stubs for Phases 0–7 in place. Build not yet attempted.
+
+- Repo initialised on branch `main`. One commit: `a4dcdd3 scaffold project layout`. All later edits unstaged.
+- Source files written (empty bodies for Phase 2+ components):
+  - `App/AppDelegate.swift`, `App/StatusItemController.swift`, `App/Info.plist`
+  - `Core/HotkeyMonitor.swift`, `Core/AudioRecorder.swift`, `Core/TextInjector.swift`
+  - `Transcribers/Transcriber.swift` (protocol + local `TranscriberResult` enum), `WhisperCppTranscriber.swift`, `OpenAITranscriber.swift`
+  - `Prefs/Preferences.swift` (UserDefaults-backed; API key will migrate to Keychain)
+- `StatusItemController` is functional: menu bar item appears, Start/Stop toggles the icon glyph, Quit works. All other menu actions are no-ops until Phase 2+.
+- Xcode 10.1 project created via the IDE (no XcodeGen — MacPorts has 2.46.0 but it requires Swift 5.5+ and would not build under Xcode 10.1).
+- Project nested two levels deep after creation (Xcode behaviour); flattened by moving `push-to-dictate.xcodeproj` to repo root and rewriting group paths in `project.pbxproj` from `../App` → `App`, etc.
+- `project.pbxproj` rewritten to remove phantom `push-to-dictateTests` and `push-to-dictateUITests` native targets (deleting the folders in the Project Navigator did not remove the target definitions, causing undeletable xctest refs in Products). Validated with `plutil -lint`.
+- Build settings:
+  - Code Signing Identity → `Sign to Run Locally` (`-`) for Debug and Release; Code Signing Style → Manual; Development Team cleared; Provisioning Profile cleared.
+  - App Sandbox capability disabled (dictation utility cannot run sandboxed).
+  - `INFOPLIST_FILE = App/Info.plist`
+  - `MACOSX_DEPLOYMENT_TARGET = 10.13`
+  - `SWIFT_VERSION = 4.2`
+  - Main Interface left empty; `MainMenu.xib` deleted (no app menu for `LSUIElement = YES` menu-bar app at this stage).
+- Project opens cleanly on reopen. **First build (⌘B) not yet performed** — pending next session.
