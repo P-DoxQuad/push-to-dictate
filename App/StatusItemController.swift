@@ -7,11 +7,15 @@ final class StatusItemController: NSObject {
     private var pushToTalkModeItem: NSMenuItem!
     private var isRecording = false
 
+    private let hotkeyMonitor = HotkeyMonitor()
+
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         configureButton()
         statusItem.menu = buildMenu()
+        configureHotkey()
+        promptForAccessibilityIfNeeded()
     }
 
     private func configureButton() {
@@ -65,19 +69,72 @@ final class StatusItemController: NSObject {
         return menu
     }
 
-    @objc private func toggleDictation() {
-        isRecording.toggle()
+    private func configureHotkey() {
+        applyHotkeySettings()
+        hotkeyMonitor.onActivate = { [weak self] in self?.handleHotkeyActivate() }
+        hotkeyMonitor.onDeactivate = { [weak self] in self?.handleHotkeyDeactivate() }
+        hotkeyMonitor.start()
+    }
+
+    private func applyHotkeySettings() {
+        let prefs = Preferences.shared
+        hotkeyMonitor.keyCode = prefs.hotkeyKeyCode
+        hotkeyMonitor.modifierFlags = prefs.hotkeyModifierFlags
+        hotkeyMonitor.mode = (prefs.hotkeyMode == .pushToTalk) ? .pushToTalk : .toggle
+    }
+
+    private func handleHotkeyActivate() {
+        if hotkeyMonitor.mode == .pushToTalk {
+            setRecording(true)
+        } else {
+            setRecording(!isRecording)
+        }
+    }
+
+    private func handleHotkeyDeactivate() {
+        if hotkeyMonitor.mode == .pushToTalk {
+            setRecording(false)
+        }
+    }
+
+    private func setRecording(_ recording: Bool) {
+        isRecording = recording
         statusItem.button?.title = isRecording ? "\u{25CF}" : "\u{25CB}"
         toggleMenuItem.title = isRecording ? "Stop Dictation" : "Start Dictation"
     }
 
+    private func promptForAccessibilityIfNeeded() {
+        if HotkeyMonitor.hasAccessibilityPermission() { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Accessibility permission required"
+        alert.informativeText =
+            "push-to-dictate needs Accessibility access to listen for its global hotkey " +
+            "and to insert transcribed text into other apps.\n\n" +
+            "Open System Preferences → Security & Privacy → Privacy → Accessibility and " +
+            "add push-to-dictate, then relaunch the app."
+        alert.addButton(withTitle: "Open Accessibility Preferences")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn {
+            let url = URL(string:
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc private func toggleDictation() {
+        setRecording(!isRecording)
+    }
+
     @objc private func selectToggleMode() {
         Preferences.shared.hotkeyMode = .toggle
+        applyHotkeySettings()
         syncModeMenuState()
     }
 
     @objc private func selectPushToTalkMode() {
         Preferences.shared.hotkeyMode = .pushToTalk
+        applyHotkeySettings()
         syncModeMenuState()
     }
 
