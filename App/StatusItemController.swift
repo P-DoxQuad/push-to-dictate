@@ -111,12 +111,47 @@ final class StatusItemController: NSObject {
                 return
             }
         } else {
-            _ = audioRecorder.stop()
+            let samples = audioRecorder.stop()
+            transcribe(samples: samples)
         }
 
         isRecording = recording
         statusItem.button?.title = isRecording ? "\u{25CF}" : "\u{25CB}"
         toggleMenuItem.title = isRecording ? "Stop Dictation" : "Start Dictation"
+    }
+
+    private func transcribe(samples: [Float]) {
+        guard !samples.isEmpty else { return }
+        let transcriber = makeTranscriber()
+        let backendLabel = Preferences.shared.backend.rawValue
+        let startedAt = Date()
+        NSLog("push-to-dictate: transcribing %d samples via %@",
+              samples.count, backendLabel)
+        transcriber.transcribe(audio: samples) { result in
+            let elapsed = Date().timeIntervalSince(startedAt)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let text):
+                    NSLog("push-to-dictate: transcript (%.2fs): %@", elapsed, text)
+                case .failure(let error):
+                    NSLog("push-to-dictate: transcription failed (%.2fs): %@",
+                          elapsed, error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func makeTranscriber() -> Transcriber {
+        let prefs = Preferences.shared
+        switch prefs.backend {
+        case .openAI:
+            return OpenAITranscriber(apiKey: prefs.openAIAPIKey)
+        case .whisperCpp:
+            return WhisperCppTranscriber(
+                executableURL: URL(fileURLWithPath: prefs.whisperCliPath),
+                modelURL: URL(fileURLWithPath: prefs.whisperModelPath)
+            )
+        }
     }
 
     private func configureAudio() {

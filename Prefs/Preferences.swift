@@ -17,6 +17,9 @@ final class Preferences {
         static let localModelFilename = "localModelFilename"
         static let hotkeyKeyCode = "hotkeyKeyCode"
         static let hotkeyModifierFlags = "hotkeyModifierFlags"
+        static let whisperCliPath = "whisperCliPath"
+        static let openAIAPIKey = "openAIAPIKey"
+        static let openAILanguage = "openAILanguage"
     }
 
     private static let defaultHotkeyKeyCode: Int = 49
@@ -58,6 +61,41 @@ final class Preferences {
             return CGEventFlags(rawValue: raw)
         }
         set { defaults.set(NSNumber(value: newValue.rawValue), forKey: Key.hotkeyModifierFlags) }
+    }
+
+    var whisperCliPath: String {
+        get {
+            if let stored = defaults.string(forKey: Key.whisperCliPath), !stored.isEmpty {
+                return stored
+            }
+            return Preferences.defaultSupportDirectory
+                .appendingPathComponent("bin/whisper-cli").path
+        }
+        set { defaults.set(newValue, forKey: Key.whisperCliPath) }
+    }
+
+    var whisperModelPath: String {
+        return Preferences.defaultSupportDirectory
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent(localModelFilename).path
+    }
+
+    // Stored in UserDefaults for now; moves to Keychain in Phase 7.
+    var openAIAPIKey: String {
+        get { return defaults.string(forKey: Key.openAIAPIKey) ?? "" }
+        set { defaults.set(newValue, forKey: Key.openAIAPIKey) }
+    }
+
+    var openAILanguage: String {
+        get { return defaults.string(forKey: Key.openAILanguage) ?? "en" }
+        set { defaults.set(newValue, forKey: Key.openAILanguage) }
+    }
+
+    static var defaultSupportDirectory: URL {
+        let fm = FileManager.default
+        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        return base.appendingPathComponent("push-to-dictate", isDirectory: true)
     }
 
     private init() {}
