@@ -8,6 +8,8 @@ final class StatusItemController: NSObject {
     private var isRecording = false
 
     private let hotkeyMonitor = HotkeyMonitor()
+    private let audioRecorder = AudioRecorder()
+    private var lastLevelLog: Date = .distantPast
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -15,6 +17,7 @@ final class StatusItemController: NSObject {
         configureButton()
         statusItem.menu = buildMenu()
         configureHotkey()
+        configureAudio()
         promptForAccessibilityIfNeeded()
     }
 
@@ -98,9 +101,36 @@ final class StatusItemController: NSObject {
     }
 
     private func setRecording(_ recording: Bool) {
+        if recording == isRecording { return }
+
+        if recording {
+            do {
+                try audioRecorder.start()
+            } catch {
+                NSLog("push-to-dictate: failed to start audio capture: \(error)")
+                return
+            }
+        } else {
+            _ = audioRecorder.stop()
+        }
+
         isRecording = recording
         statusItem.button?.title = isRecording ? "\u{25CF}" : "\u{25CB}"
         toggleMenuItem.title = isRecording ? "Stop Dictation" : "Start Dictation"
+    }
+
+    private func configureAudio() {
+        audioRecorder.onLevel = { [weak self] level in
+            guard let self = self else { return }
+            let now = Date()
+            if now.timeIntervalSince(self.lastLevelLog) >= 0.25 {
+                self.lastLevelLog = now
+                NSLog("push-to-dictate: mic RMS %.4f", level)
+            }
+        }
+        audioRecorder.onCaptureSaved = { url in
+            NSLog("push-to-dictate: saved recording to %@", url.path)
+        }
     }
 
     private func promptForAccessibilityIfNeeded() {
