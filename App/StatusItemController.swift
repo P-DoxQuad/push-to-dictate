@@ -2,6 +2,9 @@ import Cocoa
 
 final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
+    private var toggleMenuItem: NSMenuItem!
+    private var toggleModeItem: NSMenuItem!
+    private var pushToTalkModeItem: NSMenuItem!
     private var isRecording = false
 
     override init() {
@@ -20,29 +23,29 @@ final class StatusItemController: NSObject {
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
-        let toggle = NSMenuItem(title: "Start Dictation",
-                                action: #selector(toggleDictation),
-                                keyEquivalent: "")
-        toggle.target = self
-        menu.addItem(toggle)
+        toggleMenuItem = NSMenuItem(title: "Start Dictation",
+                                    action: #selector(toggleDictation),
+                                    keyEquivalent: "")
+        toggleMenuItem.target = self
+        menu.addItem(toggleMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
         let modeItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
         let modeSubmenu = NSMenu()
-        let toggleMode = NSMenuItem(title: "Toggle",
+        toggleModeItem = NSMenuItem(title: "Toggle",
                                     action: #selector(selectToggleMode),
                                     keyEquivalent: "")
-        toggleMode.target = self
-        toggleMode.state = .on
-        let pttMode = NSMenuItem(title: "Push-to-talk",
-                                 action: #selector(selectPushToTalkMode),
-                                 keyEquivalent: "")
-        pttMode.target = self
-        modeSubmenu.addItem(toggleMode)
-        modeSubmenu.addItem(pttMode)
+        toggleModeItem.target = self
+        pushToTalkModeItem = NSMenuItem(title: "Push-to-talk",
+                                        action: #selector(selectPushToTalkMode),
+                                        keyEquivalent: "")
+        pushToTalkModeItem.target = self
+        modeSubmenu.addItem(toggleModeItem)
+        modeSubmenu.addItem(pushToTalkModeItem)
         modeItem.submenu = modeSubmenu
         menu.addItem(modeItem)
+        syncModeMenuState()
 
         menu.addItem(NSMenuItem.separator())
 
@@ -65,9 +68,24 @@ final class StatusItemController: NSObject {
     @objc private func toggleDictation() {
         isRecording.toggle()
         statusItem.button?.title = isRecording ? "\u{25CF}" : "\u{25CB}"
+        toggleMenuItem.title = isRecording ? "Stop Dictation" : "Start Dictation"
     }
 
-    @objc private func selectToggleMode() {}
-    @objc private func selectPushToTalkMode() {}
+    @objc private func selectToggleMode() {
+        Preferences.shared.hotkeyMode = .toggle
+        syncModeMenuState()
+    }
+
+    @objc private func selectPushToTalkMode() {
+        Preferences.shared.hotkeyMode = .pushToTalk
+        syncModeMenuState()
+    }
+
     @objc private func openPreferences() {}
+
+    private func syncModeMenuState() {
+        let current = Preferences.shared.hotkeyMode
+        toggleModeItem.state = (current == .toggle) ? .on : .off
+        pushToTalkModeItem.state = (current == .pushToTalk) ? .on : .off
+    }
 }

@@ -134,3 +134,11 @@ Repo scaffolded, Xcode project created and cleaned, source stubs for Phases 0–
   - `SWIFT_VERSION = 4.2`
   - Main Interface left empty; `MainMenu.xib` deleted (no app menu for `LSUIElement = YES` menu-bar app at this stage).
 - Project opens cleanly on reopen. **First build (⌘B) not yet performed** — pending next session.
+
+### 2026-11-11 — Phases 0 + 1 closed
+
+- First build succeeded. First run showed no menu-bar icon: on macOS, `@NSApplicationMain` relies on `MainMenu.xib`'s File's Owner → delegate outlet to wire the delegate; without the xib, `applicationDidFinishLaunching` never fires. Replaced with explicit `App/main.swift` bootstrap (`NSApplication.shared.delegate = AppDelegate(); app.run()`); `@NSApplicationMain` removed.
+- Removed `Info.plist` from the Copy Bundle Resources build phase (Xcode warning; the plist is consumed via `INFOPLIST_FILE` build setting, not via resource copying).
+- `StatusItemController` now reflects state: toggle item title flips between "Start Dictation" / "Stop Dictation" with the icon glyph, and the Mode submenu checkmark follows `Preferences.hotkeyMode` (persists across launches via `UserDefaults`).
+- Mode selection still has no behavioural effect — that wires in Phase 2 alongside `HotkeyMonitor`.
+- Menu bar presence, toggle, mode selection persistence, and Quit all verified by hand.
