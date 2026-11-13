@@ -31,7 +31,9 @@ claude.local.md
 CLAUDE.local.md
 .claude/settings.local.json
 
-# whisper.cpp models and binaries (fetched/built locally)
+# whisper.cpp vendored source, built artifacts, and model files
+# Populated by scripts/setup.sh; not committed. See DEVLOG for rationale.
+vendor/
 models/
 *.bin
 *.gguf

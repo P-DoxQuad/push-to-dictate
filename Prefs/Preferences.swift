@@ -68,6 +68,9 @@ final class Preferences {
             if let stored = defaults.string(forKey: Key.whisperCliPath), !stored.isEmpty {
                 return stored
             }
+            if let bundled = Bundle.main.url(forResource: "whisper-cli", withExtension: nil) {
+                return bundled.path
+            }
             return Preferences.defaultSupportDirectory
                 .appendingPathComponent("bin/whisper-cli").path
         }
@@ -75,9 +78,16 @@ final class Preferences {
     }
 
     var whisperModelPath: String {
+        let filename = localModelFilename
+        let stem = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        if let bundled = Bundle.main.url(forResource: stem,
+                                         withExtension: ext.isEmpty ? nil : ext) {
+            return bundled.path
+        }
         return Preferences.defaultSupportDirectory
             .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent(localModelFilename).path
+            .appendingPathComponent(filename).path
     }
 
     // Stored in UserDefaults for now; moves to Keychain in Phase 7.

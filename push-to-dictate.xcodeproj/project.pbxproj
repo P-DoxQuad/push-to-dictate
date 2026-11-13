@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		136EDB6A30A5757B00B3EC5B /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDB6930A5757B00B3EC5B /* main.swift */; };
+		136EDB6F30A6BD8A00B3EC5B /* ggml-small.en.bin in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB6E30A6BD8A00B3EC5B /* ggml-small.en.bin */; };
+		136EDB7130A6BDBC00B3EC5B /* Licenses in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB7030A6BDBB00B3EC5B /* Licenses */; };
+		136EDB7330A6BECD00B3EC5B /* whisper-cli in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB7230A6BECD00B3EC5B /* whisper-cli */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		13743FE630A2D8EB00FAC440 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FD930A2D8EB00FAC440 /* AppDelegate.swift */; };
 		13743FE830A2D8EB00FAC440 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FDB30A2D8EB00FAC440 /* StatusItemController.swift */; };
 		13743FE930A2D8EB00FAC440 /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FDD30A2D8EB00FAC440 /* Preferences.swift */; };
@@ -19,8 +22,27 @@
 		13743FEF30A2D8EB00FAC440 /* TextInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FE530A2D8EB00FAC440 /* TextInjector.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		136EDB6B30A6BD2000B3EC5B /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 7;
+			files = (
+				136EDB7330A6BECD00B3EC5B /* whisper-cli in CopyFiles */,
+				136EDB7130A6BDBC00B3EC5B /* Licenses in CopyFiles */,
+				136EDB6F30A6BD8A00B3EC5B /* ggml-small.en.bin in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		136EDB6930A5757B00B3EC5B /* main.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		136EDB6C30A6BD7700B3EC5B /* main */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = main; path = vendor/whisper.cpp/build/bin/main; sourceTree = "<group>"; };
+		136EDB6E30A6BD8A00B3EC5B /* ggml-small.en.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = "ggml-small.en.bin"; path = "vendor/models/ggml-small.en.bin"; sourceTree = "<group>"; };
+		136EDB7030A6BDBB00B3EC5B /* Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Licenses; sourceTree = "<group>"; };
+		136EDB7230A6BECD00B3EC5B /* whisper-cli */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = "whisper-cli"; path = "vendor/whisper.cpp/build/bin/whisper-cli"; sourceTree = "<group>"; };
 		13743FAB30A2D38700FAC440 /* push-to-dictate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "push-to-dictate.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		13743FD930A2D8EB00FAC440 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		13743FDA30A2D8EB00FAC440 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -48,6 +70,10 @@
 		13743FA230A2D38600FAC440 = {
 			isa = PBXGroup;
 			children = (
+				136EDB7230A6BECD00B3EC5B /* whisper-cli */,
+				136EDB7030A6BDBB00B3EC5B /* Licenses */,
+				136EDB6E30A6BD8A00B3EC5B /* ggml-small.en.bin */,
+				136EDB6C30A6BD7700B3EC5B /* main */,
 				13743FD830A2D8EB00FAC440 /* App */,
 				13743FE230A2D8EB00FAC440 /* Core */,
 				13743FDC30A2D8EB00FAC440 /* Prefs */,
@@ -113,6 +139,7 @@
 				13743FA730A2D38700FAC440 /* Sources */,
 				13743FA830A2D38700FAC440 /* Frameworks */,
 				13743FA930A2D38700FAC440 /* Resources */,
+				136EDB6B30A6BD2000B3EC5B /* CopyFiles */,
 			);
 			buildRules = (
 			);

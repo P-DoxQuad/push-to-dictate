@@ -176,3 +176,166 @@ Repo scaffolded, Xcode project created and cleaned, source stubs for Phases 0–
 - `StatusItemController.setRecording(false)` now forwards the captured samples to `makeTranscriber().transcribe(...)` which routes to the backend named in `Preferences.backend` (default `.whisperCpp`). Results and errors both log to Console with elapsed time.
 - `AudioRecorder`'s debug WAV writer is left in place deliberately — it's useful alongside the transcript ("was the audio good?") when diagnosing Phase 5 and will be gated behind a preference once Phase 7 adds the UI.
 - **Not verified yet**: whisper backend has no binary/model to run against (Phase 5), and the OpenAI backend has no key configured. At stop, you will see a Console log `transcription failed: whisper-cli not found or not executable at ...` which is the expected failure mode until Phase 5.
+
+### 2026-11-12 — Phase 5 plan (pre-execution)
+
+Plan of record agreed before any build/download work starts. Captures all decisions that shaped the approach so the choices aren't re-derived later.
+
+#### Goal
+
+Produce a working `whisper-cli` binary and a Whisper model file on this machine, place both inside the `push-to-dictate.app` bundle so the shipped app is fully self-contained, and lay down a repeatable setup path for future fresh clones.
+
+#### Hardware constraint driving the build flags
+
+Target machine CPU is Intel Xeon X5650 (Westmere-EP). Instruction sets present: SSE4.2, AES-NI. Instruction sets **absent**: AVX, AVX2, FMA, F16C. Default whisper.cpp builds assume AVX and die with `illegal instruction` on this hardware. Mandatory CMake flags for the build:
+
+```
+-DGGML_METAL=OFF
+-DGGML_AVX=OFF
+-DGGML_AVX2=OFF
+-DGGML_FMA=OFF
+-DGGML_F16C=OFF
+-DGGML_NATIVE=ON
+-DCMAKE_BUILD_TYPE=Release
+```
+
+`GGML_NATIVE=ON` lets the build pick up SSE4.2 that the Xeon *does* have.
+
+#### Source layout — three locations, each with a specific reason
+
+1. **`/Volumes/Data-RAID/Users/mdzura/Documents/Projects/Sandbox/whisper.cpp/`** — standalone upstream clone of the whisper.cpp repository. Not tied to push-to-dictate. Reusable across any future project that needs whisper.cpp. Follows the user's existing Sandbox convention (Chromium Source, Firefox source, etc.).
+2. **`/Volumes/Data-RAID/Users/mdzura/Documents/Projects/Sandbox/push-to-dictate/vendor/whisper.cpp/`** — project-local copy of the source, created by `rsync` from (1) with the upstream `.git` directory kept intact. This is what we actually build against for push-to-dictate. Pinned at whatever commit we rsynced; independent of upstream updates to (1).
+3. **`/Volumes/Data-RAID/Users/mdzura/Documents/Projects/Sandbox/push-to-dictate/vendor/models/ggml-small.en.bin`** — the model file. ~465 MB. Lives inside the project's `vendor/` tree because it's an external artifact bound to this specific project build.
+
+#### Model acquisition — source URL
+
+**Right now (first-time setup):** downloaded directly from Hugging Face.
+
+```
+https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
+```
+
+URL parts: `huggingface.co` → account `ggerganov` (whisper.cpp author) → repository `whisper.cpp` → raw file fetch from the `main` branch → file `ggml-small.en.bin`.
+
+Fetch command:
+
+```
+curl -L -o vendor/models/ggml-small.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
+```
+
+`-L` follows HTTP redirects (Hugging Face uses a CDN). SHA256 of the downloaded file is captured at download time and used by the setup script for integrity verification on future runs.
+
+**Future (after GitHub preservation is set up):** downloaded from the user's own GitHub Release asset, at a URL of the form:
+
+```
+https://github.com/P-DoxQuad/push-to-dictate/releases/download/assets-v1/ggml-small.en.bin
+```
+
+Setup script will prefer this URL and fall back to Hugging Face if the Release is unreachable.
+
+#### Version-control decision — `.gitignore` the vendor tree
+
+`vendor/` (and therefore everything under it — whisper.cpp source and models) is added to `.gitignore`. Rationale:
+
+- The 465 MB model exceeds GitHub's 100 MB single-file push limit. Regular git commits can't carry it.
+- Git LFS would work but has a 1 GB/month bandwidth cap on the free tier that gets blown by a handful of fresh clones of a 465 MB file.
+- GitHub Release assets have **no bandwidth limit** and allow 2 GB per file. That's where the model actually lives for distribution.
+- The setup script repopulates `vendor/` on any fresh clone, keeping the repo itself small and the preservation story intact without quota concerns.
+
+Scripts that know how to rebuild the artifacts are more valuable in the repo than the artifacts themselves.
+
+#### Preservation strategy — no third-party criticism path
+
+The project's offline-first promise extends to the toolchain itself: nothing in the critical path should depend on Hugging Face, OpenAI, or ggerganov remaining up.
+
+- **Model**: uploaded to a GitHub Release owned by the user (`P-DoxQuad/push-to-dictate`, tag `assets-v1`). User's copy, free hosting, unlimited download bandwidth.
+- **whisper.cpp source**: user forks `ggerganov/whisper.cpp` to their own GitHub account. Setup script clones from the fork at a pinned commit SHA. If upstream disappears, the fork remains.
+- **Build recipe (CMake flags, pinned commit, SHA256, filenames)**: committed to `scripts/setup.sh` in this repo. Always reproducible.
+- **Finished `.app`**: shipped as a Release asset itself. End users download one file containing binary + model + licenses.
+
+The fork and the Release upload are user-side GitHub actions deferred until after Phase 5 code work is done. Setup script defaults point at upstream Hugging Face / `ggerganov` for now; two config variables change to the user's URLs when the preservation infrastructure is created.
+
+#### Setup script — `scripts/setup.sh`
+
+Committed to the repo. Idempotent (re-running skips completed steps). Config variables at the top:
+
+```
+WHISPER_REPO     # default upstream; flip to user fork later
+WHISPER_COMMIT   # pinned SHA for reproducibility
+MODEL_URL        # default Hugging Face; flip to user Release asset later
+MODEL_SHA256     # integrity check on model download
+```
+
+Workflow: clone whisper.cpp at pinned SHA into `vendor/whisper.cpp/` if missing → `cmake` configure with the no-AVX flags → `cmake --build build -j 6` → download model to `vendor/models/` if missing → verify SHA256.
+
+#### Bundling — Xcode Copy Files build phase
+
+Adds one new build phase to the `push-to-dictate` target in the Xcode project:
+
+- Destination: Resources (resolves to `push-to-dictate.app/Contents/Resources/` at build time)
+- Files to copy on every build:
+  - `vendor/whisper.cpp/build/bin/whisper-cli`
+  - `vendor/models/ggml-small.en.bin`
+  - `Licenses/` directory (see Attribution below)
+
+End-user `.app` becomes self-contained from first launch. No downloads, no setup, no missing-model dialog.
+
+#### Runtime path resolution — bundle-first with override
+
+`Preferences.whisperCliPath` and `Preferences.whisperModelPath` will check, in order:
+
+1. User-set preference value (non-empty string) — honoured as-is.
+2. `Bundle.main.url(forResource: "whisper-cli", withExtension: nil)?.path` (or equivalent for the model) — the bundled copy inside `push-to-dictate.app/Contents/Resources/`.
+3. `~/Library/Application Support/push-to-dictate/bin/whisper-cli` (or `.../models/<filename>`) — the sidecar fallback.
+
+End users hit (2). Developers running out of Xcode without the Copy Files phase populated hit (3). Power users override via (1).
+
+#### Attribution
+
+- **Repo root** `THIRD_PARTY_NOTICES.md` — lists whisper.cpp and the Whisper model, carries the MIT license text and copyright for each. Committed.
+- **App bundle** `Contents/Resources/Licenses/` — a directory containing `whisper.cpp-LICENSE.txt` and `whisper-model-LICENSE.txt`. Included via the Copy Files build phase.
+- **About / Credits UI** — deferred to Phase 7 (the preferences/UI phase).
+
+#### Phase 5 execution sequence (what gets done now)
+
+1. `git clone https://github.com/ggerganov/whisper.cpp Sandbox/whisper.cpp`. ~30 s.
+2. `rsync -a Sandbox/whisper.cpp/ push-to-dictate/vendor/whisper.cpp/`. Few seconds.
+3. Add `vendor/` to `push-to-dictate/.gitignore`.
+4. Create `push-to-dictate/vendor/whisper.cpp/build/` and run CMake configure with the flags listed above, then `cmake --build build -j 6`. **3–5 minutes**.
+5. Smoke test: run `vendor/whisper.cpp/build/bin/whisper-cli --help`.
+6. Create `push-to-dictate/vendor/models/` and `curl` the model from Hugging Face. **1–5 minutes** depending on bandwidth.
+7. Record the SHA256 of the downloaded model.
+8. Write `push-to-dictate/scripts/setup.sh` with the recipe above.
+9. Update `Preferences.swift` to implement the three-tier path resolution.
+10. Write `THIRD_PARTY_NOTICES.md` + add `Licenses/` folder with MIT texts.
+11. (User action in Xcode) Add Copy Files build phase that bundles `whisper-cli`, `ggml-small.en.bin`, and `Licenses/` into `Contents/Resources/`.
+12. Verify end-to-end: hotkey → speak → release → Console logs a real transcript (not "whisper-cli not found").
+13. DEVLOG close-out entry + commit under one proposed message, pending approval.
+
+#### Deferred (not Phase 5)
+
+- Creation of the user's fork of `ggerganov/whisper.cpp` on GitHub.
+- Creation of the GitHub Release `assets-v1` and model upload.
+- Flipping `WHISPER_REPO` and `MODEL_URL` in `scripts/setup.sh` to the user's URLs.
+- Larger-model selection UI (medium.en / large-v3) — Phase 7 (preferences window).
+- First-run "model missing" UX — unnecessary with bundled small.en; revisit if/when the user adds larger-model downloads in Phase 7.
+- About / Credits dialog — Phase 7.
+- Replacing the whisper-cli shell-out with direct `libwhisper` linkage via a Swift ↔ C bridging header — Phase 5 later-milestone, after the shell-out path is verified working.
+
+### 2026-11-12 — Phase 5 closed (local transcription verified)
+
+- whisper.cpp **pinned to v1.7.2** (not latest). Reason: on 2024-12-08, upstream introduced `#include <filesystem>` in `ggml/src/ggml-backend-reg.cpp`; Xcode 10.1's bundled libc++ has no `<filesystem>` header (that's a C++17 implementation requiring macOS 10.15 SDK). v1.8.3 is the first tag to contain this dependency; v1.7.2 is the latest tag that still builds against High Sierra's libc++. Cost: ~12 months of upstream changes we're not getting. For CPU small.en inference the path hasn't materially changed in that window, so the practical impact is small.
+- Build flags for Mac Pro 5,1 Westmere Xeons (no AVX/AVX2/FMA/F16C): `-DGGML_METAL=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release`. Accelerate framework auto-detected and linked for BLAS.
+- v1.7.2 builds the CLI binary as `main`, not `whisper-cli` (the rename landed later upstream). `scripts/setup.sh` copies `main` → `whisper-cli` after build so the app's path resolution is naming-stable regardless of upstream version.
+- Downloaded `ggml-small.en.bin` from `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin`. SHA256 captured: `c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d`. Setup script verifies on every re-run.
+- `scripts/setup.sh` (committed) is idempotent: clones at pinned tag → CMake configure with the no-AVX flags → build → rename to `whisper-cli` → download model → verify SHA256. Runs through MacPorts `cmake` at `/opt/local/bin/cmake` via a PATH fallback.
+- `vendor/` added to `.gitignore`. Model + source tree repopulate via `scripts/setup.sh`.
+- `Preferences.whisperCliPath` / `whisperModelPath` resolution is now three-tier: user preference → `Bundle.main` resource → `~/Library/Application Support/push-to-dictate/.../` fallback. End-user builds hit the bundle; dev builds can hit either depending on whether Copy Files has run.
+- Xcode **Copy Files** build phase added to the `push-to-dictate` target (destination Resources). Bundles `vendor/whisper.cpp/build/bin/whisper-cli`, `vendor/models/ggml-small.en.bin`, and the `Licenses/` folder (as a blue folder reference) into `push-to-dictate.app/Contents/Resources/` on every build.
+- Attribution: `Licenses/whisper.cpp-LICENSE.txt`, `Licenses/whisper-model-LICENSE.txt`, and top-level `THIRD_PARTY_NOTICES.md` added. MIT text + copyrights for whisper.cpp (The ggml authors) and Whisper (OpenAI).
+- Cleaned up three `withUnsafeBufferPointer` unused-result warnings in `AudioRecorder`, `WhisperCppTranscriber`, `OpenAITranscriber` — closure returned `memcpy`'s pointer, now explicitly discarded with `_ =`.
+- Verified end-to-end: ⌃⌥Space → speak → ⌃⌥Space → Console logs real transcript from the local whisper backend. First transcription also warm-starts the model in memory.
+- **Performance baseline on the X5650 without AVX**: roughly 15× slower than realtime for the `small.en` model. Example from a 1.4 s clip: 21.3 s of total processing (833 ms load, 15.3 s encode, dominated by matmul). Usable for short dictation; impractical for anything beyond a sentence or two until Phase 8 looks at quantized models or Accelerate BLAS tuning.
+- Phase 5 later-milestone (replace shell-out with direct `libwhisper` linkage via bridging header) deferred — current path is working and the subprocess overhead is dwarfed by the inference cost on this hardware.
+- Still pending (user-side, not blocking): fork `ggerganov/whisper.cpp` to own GitHub, create `assets-v1` Release on `P-DoxQuad/push-to-dictate`, upload `ggml-small.en.bin` there, flip `WHISPER_REPO` / `MODEL_URL` defaults in `scripts/setup.sh` to point at those.

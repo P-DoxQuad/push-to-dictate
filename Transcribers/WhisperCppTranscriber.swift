@@ -60,7 +60,7 @@ final class WhisperCppTranscriber: Transcriber {
                                              frameCapacity: AVAudioFrameCount(toWrite)) else { break }
             buf.frameLength = AVAudioFrameCount(toWrite)
             guard let chData = buf.floatChannelData else { break }
-            samples.withUnsafeBufferPointer { ptr in
+            _ = samples.withUnsafeBufferPointer { ptr in
                 memcpy(chData[0],
                        ptr.baseAddress!.advanced(by: offset),
                        toWrite * MemoryLayout<Float>.size)
