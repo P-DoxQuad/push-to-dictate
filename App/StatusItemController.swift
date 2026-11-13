@@ -5,10 +5,13 @@ final class StatusItemController: NSObject {
     private var toggleMenuItem: NSMenuItem!
     private var toggleModeItem: NSMenuItem!
     private var pushToTalkModeItem: NSMenuItem!
+    private var pasteInjectionItem: NSMenuItem!
+    private var typedInjectionItem: NSMenuItem!
     private var isRecording = false
 
     private let hotkeyMonitor = HotkeyMonitor()
     private let audioRecorder = AudioRecorder()
+    private let textInjector = TextInjector()
     private var lastLevelLog: Date = .distantPast
 
     override init() {
@@ -53,6 +56,22 @@ final class StatusItemController: NSObject {
         modeItem.submenu = modeSubmenu
         menu.addItem(modeItem)
         syncModeMenuState()
+
+        let injectionItem = NSMenuItem(title: "Injection", action: nil, keyEquivalent: "")
+        let injectionSubmenu = NSMenu()
+        pasteInjectionItem = NSMenuItem(title: "Paste",
+                                        action: #selector(selectPasteInjection),
+                                        keyEquivalent: "")
+        pasteInjectionItem.target = self
+        typedInjectionItem = NSMenuItem(title: "Typed",
+                                        action: #selector(selectTypedInjection),
+                                        keyEquivalent: "")
+        typedInjectionItem.target = self
+        injectionSubmenu.addItem(pasteInjectionItem)
+        injectionSubmenu.addItem(typedInjectionItem)
+        injectionItem.submenu = injectionSubmenu
+        menu.addItem(injectionItem)
+        syncInjectionMenuState()
 
         menu.addItem(NSMenuItem.separator())
 
@@ -127,12 +146,13 @@ final class StatusItemController: NSObject {
         let startedAt = Date()
         NSLog("push-to-dictate: transcribing %d samples via %@",
               samples.count, backendLabel)
-        transcriber.transcribe(audio: samples) { result in
+        transcriber.transcribe(audio: samples) { [weak self] result in
             let elapsed = Date().timeIntervalSince(startedAt)
             DispatchQueue.main.async {
                 switch result {
                 case .success(let text):
                     NSLog("push-to-dictate: transcript (%.2fs): %@", elapsed, text)
+                    self?.textInjector.insert(text)
                 case .failure(let error):
                     NSLog("push-to-dictate: transcription failed (%.2fs): %@",
                           elapsed, error.localizedDescription)
@@ -203,11 +223,27 @@ final class StatusItemController: NSObject {
         syncModeMenuState()
     }
 
+    @objc private func selectPasteInjection() {
+        Preferences.shared.injectionMethod = .paste
+        syncInjectionMenuState()
+    }
+
+    @objc private func selectTypedInjection() {
+        Preferences.shared.injectionMethod = .typed
+        syncInjectionMenuState()
+    }
+
     @objc private func openPreferences() {}
 
     private func syncModeMenuState() {
         let current = Preferences.shared.hotkeyMode
         toggleModeItem.state = (current == .toggle) ? .on : .off
         pushToTalkModeItem.state = (current == .pushToTalk) ? .on : .off
+    }
+
+    private func syncInjectionMenuState() {
+        let current = Preferences.shared.injectionMethod
+        pasteInjectionItem.state = (current == .paste) ? .on : .off
+        typedInjectionItem.state = (current == .typed) ? .on : .off
     }
 }

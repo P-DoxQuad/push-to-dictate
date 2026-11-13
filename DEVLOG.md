@@ -339,3 +339,16 @@ End users hit (2). Developers running out of Xcode without the Copy Files phase 
 - **Performance baseline on the X5650 without AVX**: roughly 15× slower than realtime for the `small.en` model. Example from a 1.4 s clip: 21.3 s of total processing (833 ms load, 15.3 s encode, dominated by matmul). Usable for short dictation; impractical for anything beyond a sentence or two until Phase 8 looks at quantized models or Accelerate BLAS tuning.
 - Phase 5 later-milestone (replace shell-out with direct `libwhisper` linkage via bridging header) deferred — current path is working and the subprocess overhead is dwarfed by the inference cost on this hardware.
 - Still pending (user-side, not blocking): fork `ggerganov/whisper.cpp` to own GitHub, create `assets-v1` Release on `P-DoxQuad/push-to-dictate`, upload `ggml-small.en.bin` there, flip `WHISPER_REPO` / `MODEL_URL` defaults in `scripts/setup.sh` to point at those.
+
+### 2026-11-12 — Phase 6 closed
+
+- `TextInjector` fully implemented. Reads `Preferences.injectionMethod` at call time, dispatches work to a private serial `DispatchQueue` so neither path blocks main.
+- **Paste path**: snapshots `NSPasteboard.general` contents (per-item, per-type, deep-copied into fresh `NSPasteboardItem`s), writes the transcript as `.string`, posts a synthetic `⌘V` (virtual key 9 + `.maskCommand`) via `CGEvent.post(tap: .cghidEventTap)`, then restores the snapshot after a fixed 200 ms delay. Delay is a heuristic (too short → restore clobbers the paste; too long → user sees a visible clipboard gap).
+- **Typed path**: iterates `text.unicodeScalars`, posting one keyDown/keyUp pair per scalar via `CGEvent.keyboardSetUnicodeString`. No inter-character pacing — relies on the target app accepting events at full speed. Measured: near-instant for short dictation phrases, visibly types out multi-sentence output.
+- **Menu**: new "Injection" submenu (Paste / Typed) with checkmark follows `Preferences.injectionMethod`. Same pattern as the Mode submenu. Default stays `paste`.
+- `StatusItemController.transcribe` success path now routes the transcript to `textInjector.insert(text)` on the main queue (TextInjector itself hops to its own work queue).
+- Verified in TextEdit: both strategies inject the transcript correctly. Paste path restored the clipboard contents correctly after the operation.
+- Deferred to Phase 8 polish:
+  - Per-app override list ("force typed in these bundle IDs") — autocomplete-heavy apps vs paste-hostile apps.
+  - `changeCount`-based pasteboard restore instead of the fixed 200 ms heuristic.
+  - Transcription speed tuning (quantized model, greedy decoding, thread count, libwhisper direct linkage) — captured as options in-session, not actioned yet. Current ~15× realtime on X5650 without AVX dominates the user-perceived latency; the injection itself is noise.
