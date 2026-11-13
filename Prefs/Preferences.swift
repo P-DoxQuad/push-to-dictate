@@ -22,7 +22,14 @@ final class Preferences {
         static let openAIAPIKeyLegacy = "openAIAPIKey"
         static let openAILanguage = "openAILanguage"
         static let inputDeviceUID = "inputDeviceUID"
+        static let startSound = "startSound"
+        static let stopSound = "stopSound"
+        static let modelsDirectory = "modelsDirectory"
+        static let logEverything = "logEverything"
+        static let useColoredMenuBarIcon = "useColoredMenuBarIcon"
     }
+
+    static let noSoundName = "None"
 
     private static let keychainService = "push-to-dictate"
     private static let keychainAPIKeyAccount = "openai-api-key"
@@ -76,23 +83,39 @@ final class Preferences {
             if let bundled = Bundle.main.url(forResource: "whisper-cli", withExtension: nil) {
                 return bundled.path
             }
-            return Preferences.defaultSupportDirectory
-                .appendingPathComponent("bin/whisper-cli").path
+            return (Bundle.main.resourcePath ?? "") + "/whisper-cli"
         }
         set { defaults.set(newValue, forKey: Key.whisperCliPath) }
     }
 
+    // Empty string means "use the app bundle". Otherwise a user-chosen directory.
+    var modelsDirectory: String {
+        get { return defaults.string(forKey: Key.modelsDirectory) ?? "" }
+        set { defaults.set(newValue, forKey: Key.modelsDirectory) }
+    }
+
+    var logEverything: Bool {
+        get { return defaults.bool(forKey: Key.logEverything) }
+        set { defaults.set(newValue, forKey: Key.logEverything) }
+    }
+
+    var useColoredMenuBarIcon: Bool {
+        get { return defaults.bool(forKey: Key.useColoredMenuBarIcon) }
+        set { defaults.set(newValue, forKey: Key.useColoredMenuBarIcon) }
+    }
+
     var whisperModelPath: String {
         let filename = localModelFilename
+        if !modelsDirectory.isEmpty {
+            return (modelsDirectory as NSString).appendingPathComponent(filename)
+        }
         let stem = (filename as NSString).deletingPathExtension
         let ext = (filename as NSString).pathExtension
         if let bundled = Bundle.main.url(forResource: stem,
                                          withExtension: ext.isEmpty ? nil : ext) {
             return bundled.path
         }
-        return Preferences.defaultSupportDirectory
-            .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent(filename).path
+        return (Bundle.main.resourcePath ?? "") + "/\(filename)"
     }
 
     var openAIAPIKey: String {
@@ -134,6 +157,16 @@ final class Preferences {
     var inputDeviceUID: String {
         get { return defaults.string(forKey: Key.inputDeviceUID) ?? "" }
         set { defaults.set(newValue, forKey: Key.inputDeviceUID) }
+    }
+
+    var startSound: String {
+        get { return defaults.string(forKey: Key.startSound) ?? "Tink" }
+        set { defaults.set(newValue, forKey: Key.startSound) }
+    }
+
+    var stopSound: String {
+        get { return defaults.string(forKey: Key.stopSound) ?? "Pop" }
+        set { defaults.set(newValue, forKey: Key.stopSound) }
     }
 
     static var defaultSupportDirectory: URL {

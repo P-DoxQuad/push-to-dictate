@@ -370,3 +370,67 @@ End users hit (2). Developers running out of Xcode without the Copy Files phase 
 - `Preferences.inputDeviceUID` added — stores the selected CoreAudio device UID (empty string = system default).
 - `AudioRecorder.start()` now calls `applyPreferredInputDevice()` before installing the tap. Translates the stored UID → `AudioDeviceID` via `AudioObjectGetPropertyData(kAudioHardwarePropertyDevices)` and sets `kAudioOutputUnitProperty_CurrentDevice` on `engine.inputNode.audioUnit`. Enumeration helpers (`availableInputDevices()`, `audioDeviceID(forUID:)`) are static on `AudioRecorder` — folded in rather than a new file to avoid another Xcode add step.
 - Deferred: backend-switch re-applies the transcriber choice at the next transcription (not live-updating any state the controller holds; works because `makeTranscriber()` reads `Preferences.backend` each time). About / Credits dialog deferred to Phase 8.
+
+### 2026-11-12 / 2026-11-13 — Phase 8 polish, first pass
+
+#### Sounds
+- `Preferences.startSound` / `stopSound` added. Default `Tink` / `Pop`. Special value `"None"` (`Preferences.noSoundName`) means silent.
+- Preferences window lists sounds found in `/System/Library/Sounds/` and `~/Library/Sounds/` (common macOS convention paths), showing `.aiff` / `.caf` / `.wav`. Changing a popup plays the selected sound as a preview.
+- `StatusItemController.setRecording` calls `NSSound(named:).play()` for the configured start/stop sounds. `playSound("None")` is a no-op.
+
+#### Launch at login
+- Checkbox in Preferences writes a `~/Library/LaunchAgents/<bundle-id>.plist` (`Label`, `ProgramArguments = [Bundle.main.executablePath]`, `RunAtLoad = true`). Unchecking removes the plist. Takes effect at the next user login.
+- Uses `~/Library/LaunchAgents/` rather than `SMLoginItemSetEnabled` because the latter requires a signed helper app bundled inside `Contents/Library/LoginItems/` — unavailable under Sign-to-Run-Locally. Plist approach needs no signing.
+- Caveat captured for later: the plist records whatever binary path is currently running, so dev builds under `~/Library/Developer/Xcode/DerivedData/...` won't survive a clean. Only a shipped `.app` at a stable location makes a durable login item.
+
+#### Error surfaces
+- `showError(title:detail:)` helper in `StatusItemController`: logs via `Logger.error` + delivers an `NSUserNotification`.
+- Pre-flight check `preflightBackend()` runs *before* starting audio capture:
+  - whisper.cpp backend: checks that `Preferences.whisperCliPath` is executable and `Preferences.whisperModelPath` exists.
+  - OpenAI backend: checks that `Preferences.openAIAPIKey` is non-empty.
+  - Returns a human-readable issue string on failure; `setRecording(true)` aborts before `audioRecorder.start()` so a known-bad state never wastes a recording.
+- Runtime failures (mic start throws, transcription failure from either backend including URLSession errors) also route through `showError`.
+- `NSUserNotificationCenterDelegate.shouldPresent` returns `true` so banners appear even when the app is frontmost. `didActivate` clears the error-state icon tint early when the user clicks the banner.
+
+#### Bundle-only model architecture
+- Removed the `~/Library/Application Support/push-to-dictate/bin/` and `models/` fallback tiers from `Preferences.whisperCliPath` and `whisperModelPath`. Models and the whisper-cli binary are bundle-only. The orphan sidecar install from Phase 5 was deleted manually.
+- Added `Preferences.modelsDirectory` (string, empty = use bundle). Lets the user point at an external folder.
+- `Preferences.whisperModelPath` resolution: user override > `modelsDirectory`-joined path > `Bundle.main` lookup.
+- `PreferencesWindowController.discoverModels()` scans a single location — `modelsDirectory` if non-empty, else `Bundle.main.resourceURL`.
+- UI: new **Models folder** row (hidden when backend is OpenAI, same visibility rule as **Local model**) with a text field, **Choose…** button opening `NSOpenPanel` for a directory, and **Clear** button. Empty-state placeholder shows `Bundle.main.resourcePath` so the user sees where the default models actually live.
+- `~/Library/Application Support/push-to-dictate/` is now only used for `debug/` WAVs and `logs/`. Preferences stay in `~/Library/Preferences/` (UserDefaults, cfprefsd-managed). API key stays in Keychain.
+
+#### Logger
+- New `Core/Logger.swift`. Two levels: `error` (always written to file) and `info` (written to file only when `Preferences.logEverything` is true).
+- Writes to `~/Library/Application Support/push-to-dictate/logs/push-to-dictate.log`. One-line-per-event append format: `yyyy-MM-dd HH:mm:ss  LEVEL  message`. Append I/O serialized on a dedicated `DispatchQueue`.
+- All existing `NSLog("push-to-dictate: …")` call sites rewritten to `Logger.info(...)` / `Logger.error(...)`; `NSLog` is now only invoked from inside `Logger` itself.
+- New `Preferences.logEverything` + **Logging: ☐ Log everything (unchecked, errors only)** checkbox in Preferences.
+
+#### App icon and menu bar icons
+- `.icns` generated from `icons/Push_to_Dictate_Colour_Icon_1024.png` (downsampled from the user-supplied 1254×1254 to 1024×1024 by `sips`, then a full iconset at 16/32/128/256/512 × @1x and @2x, assembled with `iconutil`).
+- Bundled as `push-to-dictate.icns` via the Xcode Copy Files build phase; `Info.plist` gets `CFBundleIconFile = push-to-dictate`. Notification banners, Finder preview, and Cmd-Tab preview now use it.
+- Menu bar icon is image-based. Unicode glyphs (`○` / `●`) removed.
+- Three 44×44 PNGs bundled: `Push_to_Dictate_Black_Menu_Bar_44`, `_White_Menu_Bar_44`, `_Color_Menu_Bar_44`. Status item renders at 24×24.
+- `Preferences.useColoredMenuBarIcon` picks between colored and auto-mono.
+- Auto-mono picks black or white based on `isDarkMenuBar()`:
+  - macOS 10.14+: `NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua`
+  - macOS 10.13: reads `AppleInterfaceStyle` from the global `UserDefaults` domain (`"Dark"` when "Use dark menu bar and Dock" is checked in System Preferences → General).
+- Live update: KVO on `NSApp.effectiveAppearance` (10.14+) and `DistributedNotificationCenter` observer for `AppleInterfaceThemeChangedNotification` (both OS versions). Icon flips immediately when the system setting changes.
+
+#### Icon state indicators
+- Replaced the earlier red-tint-on-recording approach with a state enum and corner-dot animation.
+- `IconState`: `.idle`, `.recording`, `.processing`, `.error`.
+- `.recording`: green dot (`NSColor.systemGreen`) in the bottom-right corner, blinking on/off every 0.5 s.
+- `.processing`: sky-blue dot (`NSColor(srgbRed: 0.1, green: 0.72, blue: 1.0, alpha: 1.0)`), same blink rate.
+- `.error`: the full icon is tinted red via `sourceIn` composite over the base image. Auto-clears after 5 s (matches default macOS banner duration) or immediately when the user clicks the delivered notification.
+- State ownership: `setRecording(true)` sets `.recording`; `transcribe()` sets `.processing` on entry and either `.idle` on success or `.error` via `showError` on failure. `setRecording(false)` deliberately does *not* overwrite — it hands off to `transcribe()`.
+
+#### Preferences UI housekeeping
+- Checkbox labels reworded from `(otherwise …)` to `(unchecked, …)` — more direct.
+- Window grew to accommodate new rows (hotkey, backend, local model, models folder, API key, text insertion, input device, start sound, stop sound, startup, logging, appearance = 12 rows). Hidden rows (`local model` + `models folder` when OpenAI selected, `API key` when whisper.cpp selected) use `grid.row(at:).isHidden = …` to reflow the layout.
+
+#### Deferred (still Phase 8 scope)
+- Silent-recording detection — user flagged that recording silence currently still runs the transcriber, which emits placeholder text like `"[blank_audio]"` into the focused field.
+- "Move to /Applications" prompt on first launch from a quarantined location.
+- Per-app override for injection method (paste vs typed) to work around autocomplete-heavy apps.
+- Transcription speed tuning (quantized model, greedy decoding, thread count tweaks, direct `libwhisper` linkage).

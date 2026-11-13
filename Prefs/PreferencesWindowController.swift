@@ -15,7 +15,24 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
     private let injectionTypedRadio = NSButton(radioButtonWithTitle: "Typed",
                                                target: nil, action: nil)
     private let inputDevicePopup = NSPopUpButton()
+    private let startSoundPopup = NSPopUpButton()
+    private let stopSoundPopup = NSPopUpButton()
     private let apiKeyField = NSSecureTextField()
+    private let modelsFolderField = NSTextField()
+    private let modelsFolderChooseButton = NSButton(title: "Choose…",
+                                                    target: nil, action: nil)
+    private let modelsFolderClearButton = NSButton(title: "Clear",
+                                                   target: nil, action: nil)
+    private let launchCheckbox = NSButton(checkboxWithTitle: "Launch at login",
+                                          target: nil, action: nil)
+    private let logEverythingCheckbox = NSButton(
+        checkboxWithTitle: "Log everything (unchecked, errors only)",
+        target: nil, action: nil)
+    private let coloredIconCheckbox = NSButton(
+        checkboxWithTitle: "Colored menu bar icon (unchecked, matches light/dark mode)",
+        target: nil, action: nil)
+
+    var onColoredIconChanged: (() -> Void)?
 
     private var inputDevices: [(uid: String, name: String)] = []
     private var hotkeyMonitor: Any?
@@ -23,11 +40,12 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
 
     private var grid: NSGridView!
     private let modelRowIndex = 2
-    private let apiKeyRowIndex = 3
+    private let modelsFolderRowIndex = 3
+    private let apiKeyRowIndex = 4
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 260),
+            contentRect: NSRect(x: 0, y: 0, width: 540, height: 500),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -60,9 +78,15 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         let hotkeyLabel = NSTextField(labelWithString: "Hotkey:")
         let backendLabel = NSTextField(labelWithString: "Backend:")
         let modelLabel = NSTextField(labelWithString: "Local model:")
+        let modelsFolderLabel = NSTextField(labelWithString: "Models folder:")
         let apiKeyLabel = NSTextField(labelWithString: "OpenAI API key:")
         let injectionLabel = NSTextField(labelWithString: "Text insertion:")
         let inputDeviceLabel = NSTextField(labelWithString: "Input device:")
+        let startSoundLabel = NSTextField(labelWithString: "Start sound:")
+        let stopSoundLabel = NSTextField(labelWithString: "Stop sound:")
+        let launchLabel = NSTextField(labelWithString: "Startup:")
+        let logEverythingLabel = NSTextField(labelWithString: "Logging:")
+        let appearanceLabel = NSTextField(labelWithString: "Appearance:")
 
         hotkeyButton.bezelStyle = .rounded
         hotkeyButton.target = self
@@ -89,16 +113,50 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         inputDevicePopup.target = self
         inputDevicePopup.action = #selector(inputDeviceChanged)
 
+        startSoundPopup.target = self
+        startSoundPopup.action = #selector(startSoundChanged)
+        stopSoundPopup.target = self
+        stopSoundPopup.action = #selector(stopSoundChanged)
+
+        launchCheckbox.target = self
+        launchCheckbox.action = #selector(launchAtLoginChanged)
+
+        logEverythingCheckbox.target = self
+        logEverythingCheckbox.action = #selector(logEverythingChanged)
+
+        coloredIconCheckbox.target = self
+        coloredIconCheckbox.action = #selector(coloredIconChanged)
+
+        modelsFolderField.placeholderString =
+            Bundle.main.resourcePath ?? "Using bundled models"
+        modelsFolderField.delegate = self
+        modelsFolderChooseButton.target = self
+        modelsFolderChooseButton.action = #selector(chooseModelsFolder)
+        modelsFolderClearButton.target = self
+        modelsFolderClearButton.action = #selector(clearModelsFolder)
+        let modelsFolderStack = NSStackView(views: [
+            modelsFolderField, modelsFolderChooseButton, modelsFolderClearButton
+        ])
+        modelsFolderStack.orientation = .horizontal
+        modelsFolderStack.spacing = 6
+        modelsFolderStack.setHuggingPriority(.defaultLow, for: .horizontal)
+
         apiKeyField.placeholderString = "sk-..."
         apiKeyField.delegate = self
 
         grid = NSGridView(views: [
-            [hotkeyLabel,      hotkeyButton,     hotkeyStatusLabel],
-            [backendLabel,     backendPopup,     NSView()],
-            [modelLabel,       modelPopup,       NSView()],
-            [apiKeyLabel,      apiKeyField,      NSView()],
-            [injectionLabel,   injectionStack,   NSView()],
-            [inputDeviceLabel, inputDevicePopup, NSView()]
+            [hotkeyLabel,       hotkeyButton,      hotkeyStatusLabel],
+            [backendLabel,      backendPopup,      NSView()],
+            [modelLabel,        modelPopup,        NSView()],
+            [modelsFolderLabel, modelsFolderStack, NSView()],
+            [apiKeyLabel,       apiKeyField,       NSView()],
+            [injectionLabel,    injectionStack,    NSView()],
+            [inputDeviceLabel,  inputDevicePopup,  NSView()],
+            [startSoundLabel,   startSoundPopup,   NSView()],
+            [stopSoundLabel,    stopSoundPopup,    NSView()],
+            [launchLabel,       launchCheckbox,    NSView()],
+            [logEverythingLabel, logEverythingCheckbox, NSView()],
+            [appearanceLabel,   coloredIconCheckbox,   NSView()]
         ])
         grid.rowSpacing = 12
         grid.columnSpacing = 10
@@ -111,7 +169,8 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
             grid.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
             grid.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
             grid.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -20),
-            apiKeyField.widthAnchor.constraint(greaterThanOrEqualToConstant: 260)
+            apiKeyField.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
+            modelsFolderField.widthAnchor.constraint(greaterThanOrEqualToConstant: 220)
         ])
     }
 
@@ -124,13 +183,49 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         refreshModelPopup()
         refreshInjectionPopup()
         refreshInputDevicePopup()
+        refreshSoundPopups()
         apiKeyField.stringValue = Preferences.shared.openAIAPIKey
+        modelsFolderField.stringValue = Preferences.shared.modelsDirectory
+        launchCheckbox.state = LaunchAtLogin.isEnabled ? .on : .off
+        logEverythingCheckbox.state = Preferences.shared.logEverything ? .on : .off
+        coloredIconCheckbox.state = Preferences.shared.useColoredMenuBarIcon ? .on : .off
         updateConditionalRows()
+    }
+
+    private func refreshSoundPopups() {
+        let names = [Preferences.noSoundName] + PreferencesWindowController.availableSystemSounds()
+        startSoundPopup.removeAllItems()
+        stopSoundPopup.removeAllItems()
+        startSoundPopup.addItems(withTitles: names)
+        stopSoundPopup.addItems(withTitles: names)
+        let start = Preferences.shared.startSound
+        let stop = Preferences.shared.stopSound
+        if names.contains(start) { startSoundPopup.selectItem(withTitle: start) }
+        if names.contains(stop)  { stopSoundPopup.selectItem(withTitle: stop) }
+    }
+
+    private static func availableSystemSounds() -> [String] {
+        let dirs = [
+            "/System/Library/Sounds",
+            (NSHomeDirectory() as NSString).appendingPathComponent("Library/Sounds")
+        ]
+        var names = Set<String>()
+        for dir in dirs {
+            guard let items = try? FileManager.default.contentsOfDirectory(atPath: dir) else {
+                continue
+            }
+            for item in items where
+                item.hasSuffix(".aiff") || item.hasSuffix(".caf") || item.hasSuffix(".wav") {
+                names.insert((item as NSString).deletingPathExtension)
+            }
+        }
+        return names.sorted()
     }
 
     private func updateConditionalRows() {
         let isOpenAI = Preferences.shared.backend == .openAI
         grid.row(at: modelRowIndex).isHidden = isOpenAI
+        grid.row(at: modelsFolderRowIndex).isHidden = isOpenAI
         grid.row(at: apiKeyRowIndex).isHidden = !isOpenAI
     }
 
@@ -197,26 +292,19 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
 
     private func discoverModels() -> [String] {
         var names = Set<String>()
-
-        if let resources = Bundle.main.resourceURL,
-           let items = try? FileManager.default.contentsOfDirectory(
-                at: resources, includingPropertiesForKeys: nil) {
-            for url in items where url.pathExtension == "bin"
-                && url.lastPathComponent.hasPrefix("ggml-") {
-                names.insert(url.lastPathComponent)
-            }
+        let override = Preferences.shared.modelsDirectory
+        let searchURL: URL? = override.isEmpty
+            ? Bundle.main.resourceURL
+            : URL(fileURLWithPath: override, isDirectory: true)
+        guard let root = searchURL,
+              let items = try? FileManager.default.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: nil) else {
+            return []
         }
-
-        let modelsDir = Preferences.defaultSupportDirectory
-            .appendingPathComponent("models", isDirectory: true)
-        if let items = try? FileManager.default.contentsOfDirectory(
-                at: modelsDir, includingPropertiesForKeys: nil) {
-            for url in items where url.pathExtension == "bin"
-                && url.lastPathComponent.hasPrefix("ggml-") {
-                names.insert(url.lastPathComponent)
-            }
+        for url in items where url.pathExtension == "bin"
+            && url.lastPathComponent.hasPrefix("ggml-") {
+            names.insert(url.lastPathComponent)
         }
-
         return names.sorted()
     }
 
@@ -253,10 +341,70 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         }
     }
 
-    // NSTextFieldDelegate — API key field.
+    @objc private func launchAtLoginChanged() {
+        LaunchAtLogin.setEnabled(launchCheckbox.state == .on)
+        launchCheckbox.state = LaunchAtLogin.isEnabled ? .on : .off
+    }
+
+    @objc private func logEverythingChanged() {
+        Preferences.shared.logEverything = (logEverythingCheckbox.state == .on)
+    }
+
+    @objc private func coloredIconChanged() {
+        Preferences.shared.useColoredMenuBarIcon = (coloredIconCheckbox.state == .on)
+        onColoredIconChanged?()
+    }
+
+    @objc private func startSoundChanged() {
+        guard let title = startSoundPopup.selectedItem?.title else { return }
+        Preferences.shared.startSound = title
+        previewSound(named: title)
+    }
+
+    @objc private func stopSoundChanged() {
+        guard let title = stopSoundPopup.selectedItem?.title else { return }
+        Preferences.shared.stopSound = title
+        previewSound(named: title)
+    }
+
+    private func previewSound(named name: String) {
+        guard name != Preferences.noSoundName,
+              let sound = NSSound(named: NSSound.Name(name)) else { return }
+        sound.play()
+    }
+
+    // NSTextFieldDelegate — API key field + models folder field.
     func controlTextDidChange(_ obj: Notification) {
-        guard (obj.object as? NSSecureTextField) === apiKeyField else { return }
-        Preferences.shared.openAIAPIKey = apiKeyField.stringValue
+        if (obj.object as? NSTextField) === apiKeyField {
+            Preferences.shared.openAIAPIKey = apiKeyField.stringValue
+        } else if (obj.object as? NSTextField) === modelsFolderField {
+            Preferences.shared.modelsDirectory = modelsFolderField.stringValue
+            refreshModelPopup()
+        }
+    }
+
+    @objc private func chooseModelsFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use This Folder"
+        panel.message = "Choose a folder containing ggml-*.bin model files."
+        if let current = modelsFolderField.stringValue as String?, !current.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: current)
+        }
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.modelsFolderField.stringValue = url.path
+            Preferences.shared.modelsDirectory = url.path
+            self?.refreshModelPopup()
+        }
+    }
+
+    @objc private func clearModelsFolder() {
+        modelsFolderField.stringValue = ""
+        Preferences.shared.modelsDirectory = ""
+        refreshModelPopup()
     }
 
     @objc private func hotkeyButtonClicked() {
@@ -281,9 +429,10 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         ) { [weak self] event in
             guard let self = self else { return event }
             if event.type == .systemDefined {
-                NSLog("push-to-dictate: hotkey recorder saw systemDefined event " +
-                      "subtype=%d data1=0x%08lx data2=0x%08lx",
-                      Int(event.subtype.rawValue), event.data1, event.data2)
+                Logger.info(String(
+                    format: "hotkey recorder saw systemDefined event " +
+                            "subtype=%d data1=0x%08lx data2=0x%08lx",
+                    Int(event.subtype.rawValue), event.data1, event.data2))
                 return event
             }
             if event.type == .keyDown {
@@ -425,5 +574,45 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         case 111: return "F12"
         default:  return "Key\(keyCode)"
         }
+    }
+}
+
+fileprivate enum LaunchAtLogin {
+    static var label: String {
+        return Bundle.main.bundleIdentifier ?? "com.paradoxicalquad.push-to-dictate"
+    }
+
+    static var plistURL: URL {
+        return URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+            .appendingPathComponent("\(label).plist")
+    }
+
+    static var isEnabled: Bool {
+        return FileManager.default.fileExists(atPath: plistURL.path)
+    }
+
+    static func setEnabled(_ enabled: Bool) {
+        if enabled { install() } else { uninstall() }
+    }
+
+    private static func install() {
+        guard let exec = Bundle.main.executablePath else { return }
+        let dict: [String: Any] = [
+            "Label": label,
+            "ProgramArguments": [exec],
+            "RunAtLoad": true
+        ]
+        let dir = plistURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir,
+                                                 withIntermediateDirectories: true,
+                                                 attributes: nil)
+        guard let data = try? PropertyListSerialization.data(
+                fromPropertyList: dict, format: .xml, options: 0) else { return }
+        try? data.write(to: plistURL, options: [.atomic])
+    }
+
+    private static func uninstall() {
+        try? FileManager.default.removeItem(at: plistURL)
     }
 }

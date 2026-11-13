@@ -12,6 +12,11 @@
 		136EDB7130A6BDBC00B3EC5B /* Licenses in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB7030A6BDBB00B3EC5B /* Licenses */; };
 		136EDB7330A6BECD00B3EC5B /* whisper-cli in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB7230A6BECD00B3EC5B /* whisper-cli */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		136EDB7730A6C4E900B3EC5B /* PreferencesWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDB7630A6C4E900B3EC5B /* PreferencesWindowController.swift */; };
+		136EDB8230A7858700B3EC5B /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDB8130A7858700B3EC5B /* Logger.swift */; };
+		136EDB8730A7985C00B3EC5B /* Push_to_Dictate_White_Menu_Bar_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB8330A7985C00B3EC5B /* Push_to_Dictate_White_Menu_Bar_44.png */; };
+		136EDB8830A7985C00B3EC5B /* Push_to_Dictate_Color_Menu_Bar_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB8430A7985C00B3EC5B /* Push_to_Dictate_Color_Menu_Bar_44.png */; };
+		136EDB8930A7985C00B3EC5B /* Push_to_Dictate_Black_Menu_Bar_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB8530A7985C00B3EC5B /* Push_to_Dictate_Black_Menu_Bar_44.png */; };
+		136EDB8A30A7985C00B3EC5B /* push-to-dictate.icns in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB8630A7985C00B3EC5B /* push-to-dictate.icns */; };
 		13743FE630A2D8EB00FAC440 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FD930A2D8EB00FAC440 /* AppDelegate.swift */; };
 		13743FE830A2D8EB00FAC440 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FDB30A2D8EB00FAC440 /* StatusItemController.swift */; };
 		13743FE930A2D8EB00FAC440 /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FDD30A2D8EB00FAC440 /* Preferences.swift */; };
@@ -30,6 +35,10 @@
 			dstPath = "";
 			dstSubfolderSpec = 7;
 			files = (
+				136EDB8730A7985C00B3EC5B /* Push_to_Dictate_White_Menu_Bar_44.png in CopyFiles */,
+				136EDB8830A7985C00B3EC5B /* Push_to_Dictate_Color_Menu_Bar_44.png in CopyFiles */,
+				136EDB8930A7985C00B3EC5B /* Push_to_Dictate_Black_Menu_Bar_44.png in CopyFiles */,
+				136EDB8A30A7985C00B3EC5B /* push-to-dictate.icns in CopyFiles */,
 				136EDB7330A6BECD00B3EC5B /* whisper-cli in CopyFiles */,
 				136EDB7130A6BDBC00B3EC5B /* Licenses in CopyFiles */,
 				136EDB6F30A6BD8A00B3EC5B /* ggml-small.en.bin in CopyFiles */,
@@ -45,6 +54,11 @@
 		136EDB7030A6BDBB00B3EC5B /* Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Licenses; sourceTree = "<group>"; };
 		136EDB7230A6BECD00B3EC5B /* whisper-cli */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = "whisper-cli"; path = "vendor/whisper.cpp/build/bin/whisper-cli"; sourceTree = "<group>"; };
 		136EDB7630A6C4E900B3EC5B /* PreferencesWindowController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PreferencesWindowController.swift; sourceTree = "<group>"; };
+		136EDB8130A7858700B3EC5B /* Logger.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
+		136EDB8330A7985C00B3EC5B /* Push_to_Dictate_White_Menu_Bar_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_White_Menu_Bar_44.png; path = icons/Push_to_Dictate_White_Menu_Bar_44.png; sourceTree = "<group>"; };
+		136EDB8430A7985C00B3EC5B /* Push_to_Dictate_Color_Menu_Bar_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Color_Menu_Bar_44.png; path = icons/Push_to_Dictate_Color_Menu_Bar_44.png; sourceTree = "<group>"; };
+		136EDB8530A7985C00B3EC5B /* Push_to_Dictate_Black_Menu_Bar_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Black_Menu_Bar_44.png; path = icons/Push_to_Dictate_Black_Menu_Bar_44.png; sourceTree = "<group>"; };
+		136EDB8630A7985C00B3EC5B /* push-to-dictate.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; name = "push-to-dictate.icns"; path = "icons/push-to-dictate.icns"; sourceTree = "<group>"; };
 		13743FAB30A2D38700FAC440 /* push-to-dictate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "push-to-dictate.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		13743FD930A2D8EB00FAC440 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		13743FDA30A2D8EB00FAC440 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -72,6 +86,10 @@
 		13743FA230A2D38600FAC440 = {
 			isa = PBXGroup;
 			children = (
+				136EDB8530A7985C00B3EC5B /* Push_to_Dictate_Black_Menu_Bar_44.png */,
+				136EDB8430A7985C00B3EC5B /* Push_to_Dictate_Color_Menu_Bar_44.png */,
+				136EDB8330A7985C00B3EC5B /* Push_to_Dictate_White_Menu_Bar_44.png */,
+				136EDB8630A7985C00B3EC5B /* push-to-dictate.icns */,
 				136EDB7230A6BECD00B3EC5B /* whisper-cli */,
 				136EDB7030A6BDBB00B3EC5B /* Licenses */,
 				136EDB6E30A6BD8A00B3EC5B /* ggml-small.en.bin */,
@@ -125,6 +143,7 @@
 		13743FE230A2D8EB00FAC440 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				136EDB8130A7858700B3EC5B /* Logger.swift */,
 				13743FE330A2D8EB00FAC440 /* AudioRecorder.swift */,
 				13743FE430A2D8EB00FAC440 /* HotkeyMonitor.swift */,
 				13743FE530A2D8EB00FAC440 /* TextInjector.swift */,
@@ -213,6 +232,7 @@
 				13743FEE30A2D8EB00FAC440 /* HotkeyMonitor.swift in Sources */,
 				13743FEA30A2D8EB00FAC440 /* OpenAITranscriber.swift in Sources */,
 				13743FEC30A2D8EB00FAC440 /* WhisperCppTranscriber.swift in Sources */,
+				136EDB8230A7858700B3EC5B /* Logger.swift in Sources */,
 				136EDB6A30A5757B00B3EC5B /* main.swift in Sources */,
 				13743FE630A2D8EB00FAC440 /* AppDelegate.swift in Sources */,
 				13743FE930A2D8EB00FAC440 /* Preferences.swift in Sources */,
