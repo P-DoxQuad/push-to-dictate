@@ -352,3 +352,21 @@ End users hit (2). Developers running out of Xcode without the Copy Files phase 
   - Per-app override list ("force typed in these bundle IDs") — autocomplete-heavy apps vs paste-hostile apps.
   - `changeCount`-based pasteboard restore instead of the fixed 200 ms heuristic.
   - Transcription speed tuning (quantized model, greedy decoding, thread count, libwhisper direct linkage) — captured as options in-session, not actioned yet. Current ~15× realtime on X5650 without AVX dominates the user-perceived latency; the injection itself is noise.
+
+### 2026-11-12 — Phase 7 closed
+
+- `PreferencesWindowController` (new file, programmatic AppKit UI via `NSGridView`, no XIB). Singleton, window is not released on close, re-shows with `center()` + `makeKeyAndOrderFront`.
+- Six rows laid out in a grid:
+  1. **Hotkey** — click-to-record button. `NSEvent.addLocalMonitorForEvents` captures `.keyDown` / `.flagsChanged` while recording; writes `Preferences.hotkeyKeyCode` + `hotkeyModifierFlags` and fires `onHotkeyChanged` so `StatusItemController` re-applies to `HotkeyMonitor` live. ESC cancels.
+  2. **Backend** — `NSPopUpButton` with whisper.cpp (local) / OpenAI API, writes `Preferences.backend`.
+  3. **Local model** — `NSPopUpButton` populated by scanning `Bundle.main` Resources and `~/Library/Application Support/push-to-dictate/models/` for `ggml-*.bin`. Hidden when backend is OpenAI.
+  4. **OpenAI API key** — `NSSecureTextField`. Hidden when backend is whisper.cpp. Writes `Preferences.openAIAPIKey` on every keystroke via `controlTextDidChange`.
+  5. **Text insertion** — two `.radio`-type `NSButton`s (Paste / Typed) in a horizontal `NSStackView`. Replaces the earlier menu-bar submenu and the earlier `NSPopUpButton` sketch. Writes `Preferences.injectionMethod`.
+  6. **Input device** — `NSPopUpButton` with "System default" plus every CoreAudio device that has input streams. Writes `Preferences.inputDeviceUID`.
+- Hotkey validation rule: standalone keys are rejected unless they are F1–F20 (keycodes 96–122 + 64/79/80/90/105/106/107/113). Everything else requires at least one of ⌃ ⌥ ⇧ ⌘.
+- Hotkey recorder also listens for `.systemDefined` events (NSLogs subtype/data1/data2 to Console) as a diagnostic path for Pause/Break and PC-only keys that macOS routes through the HID system-event channel rather than keyDown. Not consumed, not saved — just a log breadcrumb for future decoding if needed.
+- Menu-bar **Mode** submenu stays (quick flip during dictation). **Injection** submenu removed — that preference moved to the Preferences window. **Preferences…** item now actually opens the window.
+- `Preferences.openAIAPIKey` migrated from `UserDefaults` to Keychain (`kSecClassGenericPassword`, service `push-to-dictate`, account `openai-api-key`). Transparent one-shot migration on first read: if the Keychain is empty but a legacy UserDefaults value exists, it's written to Keychain and removed from UserDefaults. Keychain helpers are private statics on `Preferences` (no new file).
+- `Preferences.inputDeviceUID` added — stores the selected CoreAudio device UID (empty string = system default).
+- `AudioRecorder.start()` now calls `applyPreferredInputDevice()` before installing the tap. Translates the stored UID → `AudioDeviceID` via `AudioObjectGetPropertyData(kAudioHardwarePropertyDevices)` and sets `kAudioOutputUnitProperty_CurrentDevice` on `engine.inputNode.audioUnit`. Enumeration helpers (`availableInputDevices()`, `audioDeviceID(forUID:)`) are static on `AudioRecorder` — folded in rather than a new file to avoid another Xcode add step.
+- Deferred: backend-switch re-applies the transcriber choice at the next transcription (not live-updating any state the controller holds; works because `makeTranscriber()` reads `Preferences.backend` each time). About / Credits dialog deferred to Phase 8.

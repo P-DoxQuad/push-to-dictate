@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CoreAudio
 
 final class AudioRecorder {
     static let targetSampleRate: Double = 16_000
@@ -15,6 +16,8 @@ final class AudioRecorder {
 
     func start() throws {
         if engine.isRunning { return }
+
+        try applyPreferredInputDevice()
 
         let inputNode = engine.inputNode
         let inputFormat = inputNode.inputFormat(forBus: 0)
@@ -187,5 +190,109 @@ final class AudioRecorder {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
+    }
+
+    // MARK: - Input device selection
+
+    private func applyPreferredInputDevice() throws {
+        let uid = Preferences.shared.inputDeviceUID
+        guard !uid.isEmpty else { return }
+        guard let deviceID = AudioRecorder.audioDeviceID(forUID: uid) else { return }
+        var id = deviceID
+        let au = engine.inputNode.audioUnit
+        guard let unit = au else { return }
+        let size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioUnitSetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &id,
+            size
+        )
+        if status != noErr {
+            throw NSError(domain: "AudioRecorder", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "Could not set input device (OSStatus \(status))"])
+        }
+    }
+
+    static func availableInputDevices() -> [(uid: String, name: String)] {
+        let deviceIDs = allAudioDeviceIDs()
+        var results: [(uid: String, name: String)] = []
+        for id in deviceIDs {
+            if !deviceHasInputStreams(id) { continue }
+            guard let uid = stringProperty(id, selector: kAudioDevicePropertyDeviceUID) else {
+                continue
+            }
+            let name = stringProperty(id, selector: kAudioObjectPropertyName) ?? uid
+            results.append((uid: uid, name: name))
+        }
+        return results.sorted { $0.name.lowercased() < $1.name.lowercased() }
+    }
+
+    static func audioDeviceID(forUID uid: String) -> AudioDeviceID? {
+        for id in allAudioDeviceIDs() {
+            if stringProperty(id, selector: kAudioDevicePropertyDeviceUID) == uid {
+                return id
+            }
+        }
+        return nil
+    }
+
+    private static func allAudioDeviceIDs() -> [AudioDeviceID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMaster
+        )
+        var dataSize: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize)
+        if status != noErr || dataSize == 0 { return [] }
+        let count = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        var ids = [AudioDeviceID](repeating: 0, count: count)
+        status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize, &ids)
+        if status != noErr { return [] }
+        return ids
+    }
+
+    private static func deviceHasInputStreams(_ id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMaster
+        )
+        var size: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(id, &address, 0, nil, &size)
+        if status != noErr || size == 0 { return false }
+        let bytes = UnsafeMutableRawPointer.allocate(byteCount: Int(size),
+                                                     alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { bytes.deallocate() }
+        status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, bytes)
+        if status != noErr { return false }
+        let listPtr = bytes.bindMemory(to: AudioBufferList.self, capacity: 1)
+        let buffers = UnsafeMutableAudioBufferListPointer(listPtr)
+        for buffer in buffers {
+            if buffer.mNumberChannels > 0 { return true }
+        }
+        return false
+    }
+
+    private static func stringProperty(_ id: AudioDeviceID,
+                                       selector: AudioObjectPropertySelector) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMaster
+        )
+        var cfString: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        let status = withUnsafeMutablePointer(to: &cfString) { ptr -> OSStatus in
+            AudioObjectGetPropertyData(id, &address, 0, nil, &size, ptr)
+        }
+        if status != noErr { return nil }
+        return cfString as String
     }
 }

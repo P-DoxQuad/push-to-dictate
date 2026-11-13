@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import Security
 
 final class Preferences {
     enum Backend: String { case whisperCpp, openAI }
@@ -18,9 +19,13 @@ final class Preferences {
         static let hotkeyKeyCode = "hotkeyKeyCode"
         static let hotkeyModifierFlags = "hotkeyModifierFlags"
         static let whisperCliPath = "whisperCliPath"
-        static let openAIAPIKey = "openAIAPIKey"
+        static let openAIAPIKeyLegacy = "openAIAPIKey"
         static let openAILanguage = "openAILanguage"
+        static let inputDeviceUID = "inputDeviceUID"
     }
+
+    private static let keychainService = "push-to-dictate"
+    private static let keychainAPIKeyAccount = "openai-api-key"
 
     private static let defaultHotkeyKeyCode: Int = 49
     private static let defaultHotkeyModifierFlags: UInt64 =
@@ -90,10 +95,35 @@ final class Preferences {
             .appendingPathComponent(filename).path
     }
 
-    // Stored in UserDefaults for now; moves to Keychain in Phase 7.
     var openAIAPIKey: String {
-        get { return defaults.string(forKey: Key.openAIAPIKey) ?? "" }
-        set { defaults.set(newValue, forKey: Key.openAIAPIKey) }
+        get {
+            if let fromKeychain = Preferences.keychainRead(
+                    service: Preferences.keychainService,
+                    account: Preferences.keychainAPIKeyAccount) {
+                return fromKeychain
+            }
+            // One-shot migration from the Phase 4 UserDefaults storage.
+            if let legacy = defaults.string(forKey: Key.openAIAPIKeyLegacy),
+               !legacy.isEmpty {
+                Preferences.keychainWrite(legacy,
+                                          service: Preferences.keychainService,
+                                          account: Preferences.keychainAPIKeyAccount)
+                defaults.removeObject(forKey: Key.openAIAPIKeyLegacy)
+                return legacy
+            }
+            return ""
+        }
+        set {
+            if newValue.isEmpty {
+                Preferences.keychainDelete(service: Preferences.keychainService,
+                                           account: Preferences.keychainAPIKeyAccount)
+            } else {
+                Preferences.keychainWrite(newValue,
+                                          service: Preferences.keychainService,
+                                          account: Preferences.keychainAPIKeyAccount)
+            }
+            defaults.removeObject(forKey: Key.openAIAPIKeyLegacy)
+        }
     }
 
     var openAILanguage: String {
@@ -101,11 +131,57 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.openAILanguage) }
     }
 
+    var inputDeviceUID: String {
+        get { return defaults.string(forKey: Key.inputDeviceUID) ?? "" }
+        set { defaults.set(newValue, forKey: Key.inputDeviceUID) }
+    }
+
     static var defaultSupportDirectory: URL {
         let fm = FileManager.default
         let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
         return base.appendingPathComponent("push-to-dictate", isDirectory: true)
+    }
+
+    // MARK: - Keychain
+
+    private static func keychainRead(service: String, account: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func keychainWrite(_ value: String, service: String, account: String) {
+        let data = value.data(using: .utf8) ?? Data()
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        let update: [String: Any] = [kSecValueData as String: data]
+        let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        if status == errSecItemNotFound {
+            var addQuery = query
+            addQuery[kSecValueData as String] = data
+            SecItemAdd(addQuery as CFDictionary, nil)
+        }
+    }
+
+    private static func keychainDelete(service: String, account: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 
     private init() {}

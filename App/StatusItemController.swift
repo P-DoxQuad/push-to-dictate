@@ -5,8 +5,6 @@ final class StatusItemController: NSObject {
     private var toggleMenuItem: NSMenuItem!
     private var toggleModeItem: NSMenuItem!
     private var pushToTalkModeItem: NSMenuItem!
-    private var pasteInjectionItem: NSMenuItem!
-    private var typedInjectionItem: NSMenuItem!
     private var isRecording = false
 
     private let hotkeyMonitor = HotkeyMonitor()
@@ -56,22 +54,6 @@ final class StatusItemController: NSObject {
         modeItem.submenu = modeSubmenu
         menu.addItem(modeItem)
         syncModeMenuState()
-
-        let injectionItem = NSMenuItem(title: "Injection", action: nil, keyEquivalent: "")
-        let injectionSubmenu = NSMenu()
-        pasteInjectionItem = NSMenuItem(title: "Paste",
-                                        action: #selector(selectPasteInjection),
-                                        keyEquivalent: "")
-        pasteInjectionItem.target = self
-        typedInjectionItem = NSMenuItem(title: "Typed",
-                                        action: #selector(selectTypedInjection),
-                                        keyEquivalent: "")
-        typedInjectionItem.target = self
-        injectionSubmenu.addItem(pasteInjectionItem)
-        injectionSubmenu.addItem(typedInjectionItem)
-        injectionItem.submenu = injectionSubmenu
-        menu.addItem(injectionItem)
-        syncInjectionMenuState()
 
         menu.addItem(NSMenuItem.separator())
 
@@ -223,27 +205,15 @@ final class StatusItemController: NSObject {
         syncModeMenuState()
     }
 
-    @objc private func selectPasteInjection() {
-        Preferences.shared.injectionMethod = .paste
-        syncInjectionMenuState()
+    @objc private func openPreferences() {
+        let controller = PreferencesWindowController.shared
+        controller.onHotkeyChanged = { [weak self] in self?.applyHotkeySettings() }
+        controller.showPreferences()
     }
-
-    @objc private func selectTypedInjection() {
-        Preferences.shared.injectionMethod = .typed
-        syncInjectionMenuState()
-    }
-
-    @objc private func openPreferences() {}
 
     private func syncModeMenuState() {
         let current = Preferences.shared.hotkeyMode
         toggleModeItem.state = (current == .toggle) ? .on : .off
         pushToTalkModeItem.state = (current == .pushToTalk) ? .on : .off
-    }
-
-    private func syncInjectionMenuState() {
-        let current = Preferences.shared.injectionMethod
-        pasteInjectionItem.state = (current == .paste) ? .on : .off
-        typedInjectionItem.state = (current == .typed) ? .on : .off
     }
 }
