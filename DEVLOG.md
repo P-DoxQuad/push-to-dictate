@@ -132,7 +132,7 @@ API key stays in the Keychain (`kSecClassGenericPassword`, service `push-to-dict
 - **First-launch auto-pick** — `Preferences.didAutoSelectModel` guards a one-time call in `AppDelegate.applicationDidFinishLaunching` that picks the highest-tier catalog entry which is both present on disk (bundled or downloaded) and rated `.recommended` for the host. Only fires once; after that the user's selection is authoritative. Backed up alongside the rest of the UserDefaults so a restore doesn't re-trigger it.
 - **Model-picker coloring** — the Local model popup in Preferences → Transcription colors each `ggml-*.bin` entry's title to match the Manage Models recommendation (green / orange / red for catalog entries, default label color for custom). Applied by setting `attributedTitle` on each `NSMenuItem` (setting it on `NSPopUpButtonCell` doesn't take — the cell draws from the menu item on macOS 10.13).
 - **Models-folder resolution rewrite** — bundled models are always discovered; `Preferences.modelsDirectory` (if set) only redirects the *writable* half, where downloads land and extras are read from. `Preferences.writableModelsDirectory` is `modelsDirectory` when set, otherwise `~/Library/Application Support/push-to-dictate/models/`. Picker scans *bundle ∪ writable* on every dropdown open. `whisperModelPath` resolves bundle first, then writable. Default `Preferences.localModelFilename` is `ggml-base.en-q8_0.bin` to match the new default bundled set. The **Clear** button on the Models folder field was renamed **Default** and resets the field to the writable default path.
-- **About / Credits dialog** — deferred.
+- **About dialog** — menu-bar menu grew an **About push-to-dictate** item that shows a centered `NSWindowController` with the 128 × 128 app icon (loaded via `NSApp.applicationIconImage`), app name (bold 20 pt), version pulled from `CFBundleShortVersionString`, author line "by Paradoxical Quad", a brief non-technical description, a short credits line for Whisper (OpenAI) and whisper.cpp (CPU adaptation), and the copyright. `Info.plist` version bumped to `1.0`; `NSHumanReadableCopyright` set to "© 2026 Paradoxical Quad".
 
 ---
 
@@ -525,7 +525,6 @@ Both prefs are read at transcribe time in `WhisperCppTranscriber.transcribe`, so
 - **Auto-detect thread default** via `sysctl hw.physicalcpu` at first launch instead of the current hardcoded 6.
 - **Bundling model variants** — currently only `ggml-small.en.bin` is in the Copy Files build phase. Need to decide whether to ship the full matrix (adds ~1.6 GB to the `.app`) or a curated subset (e.g. `base.en-q8_0` as the default plus `tiny.en-q8_0` and `small.en-q8_0` as alternates).
 - **Per-app override for injection method** (paste vs typed).
-- **About / Credits dialog.**
 
 ### 2026-11-14 — Model management, debug toggles, decoding knob
 
@@ -582,7 +581,13 @@ Previously `Preferences.modelsDirectory` was an override that *replaced* the bun
 - **Per-app override for injection method.**
 - **About / Credits dialog.**
 
-### 2026-11-14 — Model recommendations, Use button, first-launch pick
+### 2026-11-14 — About dialog, icon refresh, status-dot polish
+
+- **About dialog** — menu-bar menu gained an "About push-to-dictate" item. New `App/AboutWindowController.swift` draws the 128 × 128 app icon from `NSApp.applicationIconImage`, the app name, version, "by Paradoxical Quad", a non-technical one-line description ("for conventional computers. Works offline."), credits for Whisper + whisper.cpp, and the copyright. Version in `Info.plist` moved from `0.1.0` to `1.0` to match; `NSHumanReadableCopyright` populated.
+- **Icon refresh** — all four menu-bar/app icons replaced. New design is a pixel-art keycap with an open mouth and sound waves. Files: `Push_to_Dictate_Keycap_Color_1024.png` (regenerated into `push-to-dictate.icns` via `sips` + `iconutil` at the full iconset sizes), `Push_to_Dictate_Keycap_Color_44.png`, `Push_to_Dictate_Keycap_Black_44_v2.png`, `Push_to_Dictate_Keycap_White_44_v2.png`. `StatusItemController.currentMenuBarImage()` lookups updated. Old icon PNGs removed from disk and the Xcode Copy Files phase.
+- **Status-dot colors and size** — recording dot changed from green to `.systemRed`; processing dot changed from the old sky blue to a richer `srgbRed: 0.05, green: 0.25, blue: 0.80`. Dot diameter bumped from 6 pt to 10 pt (≈42 % of the 24 pt menu-bar icon's edge, up from ≈25 %). The error state is unchanged — the whole icon still tints red for 5 s or until the notification is clicked. Red-dot (recording) vs red-icon-tint (error) remain visually distinct because one is a corner mark and the other is a full-icon color shift.
+
+Version bump to `1.0` reflects the app being feature-complete for its intended use (dictation with local + cloud transcription, model management, hardware-aware recommendations, auto-pick, debug and backup prefs, About dialog). No `0.x` prerelease phase in practice — the app was built end-to-end in six days and is now usable daily.
 
 #### Catalog grew by one
 

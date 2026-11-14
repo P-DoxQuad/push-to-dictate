@@ -31,6 +31,9 @@ claude.local.md
 CLAUDE.local.md
 .claude/settings.local.json
 
+# Private idea bucket — not for public consumption
+IDEAS.md
+
 # whisper.cpp vendored source, built artifacts, and model files
 # Populated by scripts/setup.sh; not committed. See DEVLOG for rationale.
 vendor/

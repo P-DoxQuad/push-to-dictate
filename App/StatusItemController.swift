@@ -49,11 +49,11 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
     private func currentMenuBarImage() -> NSImage? {
         let base: NSImage?
         if Preferences.shared.useColoredMenuBarIcon {
-            base = NSImage(named: NSImage.Name("Push_to_Dictate_Color_Menu_Bar_44"))
+            base = NSImage(named: NSImage.Name("Push_to_Dictate_Keycap_Color_44"))
         } else {
             let isDark = isDarkMenuBar()
-            let name = isDark ? "Push_to_Dictate_White_Menu_Bar_44"
-                              : "Push_to_Dictate_Black_Menu_Bar_44"
+            let name = isDark ? "Push_to_Dictate_Keycap_White_44_v2"
+                              : "Push_to_Dictate_Keycap_Black_44_v2"
             base = NSImage(named: NSImage.Name(name))
         }
         guard let image = base else { return nil }
@@ -64,10 +64,10 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         case .error:
             return tintedRed(sized)
         case .recording:
-            return dotVisible ? withDot(sized, color: .systemGreen) : sized
+            return dotVisible ? withDot(sized, color: .systemRed) : sized
         case .processing:
-            let skyBlue = NSColor(srgbRed: 0.1, green: 0.72, blue: 1.0, alpha: 1.0)
-            return dotVisible ? withDot(sized, color: skyBlue) : sized
+            let darkBlue = NSColor(srgbRed: 0.05, green: 0.25, blue: 0.80, alpha: 1.0)
+            return dotVisible ? withDot(sized, color: darkBlue) : sized
         case .idle:
             return sized
         }
@@ -79,9 +79,10 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         result.lockFocus()
         image.draw(at: .zero, from: NSRect(origin: .zero, size: size),
                    operation: .sourceOver, fraction: 1.0)
+        let dotSize: CGFloat = 10
         color.setFill()
-        let dot = NSBezierPath(ovalIn: NSRect(x: size.width - 7, y: 0,
-                                              width: 6, height: 6))
+        let dot = NSBezierPath(ovalIn: NSRect(x: size.width - dotSize - 1, y: 0,
+                                              width: dotSize, height: dotSize))
         dot.fill()
         result.unlockFocus()
         return result
@@ -221,6 +222,12 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
                                keyEquivalent: ",")
         prefs.target = self
         menu.addItem(prefs)
+
+        let about = NSMenuItem(title: "About push-to-dictate",
+                               action: #selector(openAbout),
+                               keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -431,6 +438,10 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         controller.onHotkeyChanged = { [weak self] in self?.applyHotkeySettings() }
         controller.onColoredIconChanged = { [weak self] in self?.refreshMenuBarIcon() }
         controller.showPreferences()
+    }
+
+    @objc private func openAbout() {
+        AboutWindowController.shared.show()
     }
 
     private func syncModeMenuState() {

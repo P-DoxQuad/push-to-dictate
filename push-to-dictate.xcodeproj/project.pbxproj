@@ -12,15 +12,17 @@
 		136EDB7330A6BECD00B3EC5B /* whisper-cli in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB7230A6BECD00B3EC5B /* whisper-cli */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		136EDB7730A6C4E900B3EC5B /* PreferencesWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDB7630A6C4E900B3EC5B /* PreferencesWindowController.swift */; };
 		136EDB8230A7858700B3EC5B /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDB8130A7858700B3EC5B /* Logger.swift */; };
-		136EDB8730A7985C00B3EC5B /* Push_to_Dictate_White_Menu_Bar_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB8330A7985C00B3EC5B /* Push_to_Dictate_White_Menu_Bar_44.png */; };
-		136EDB8830A7985C00B3EC5B /* Push_to_Dictate_Color_Menu_Bar_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB8430A7985C00B3EC5B /* Push_to_Dictate_Color_Menu_Bar_44.png */; };
-		136EDB8930A7985C00B3EC5B /* Push_to_Dictate_Black_Menu_Bar_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB8530A7985C00B3EC5B /* Push_to_Dictate_Black_Menu_Bar_44.png */; };
 		136EDB8A30A7985C00B3EC5B /* push-to-dictate.icns in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB8630A7985C00B3EC5B /* push-to-dictate.icns */; };
 		136EDB8E30A8C93F00B3EC5B /* ModelDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDB8B30A8C93F00B3EC5B /* ModelDownloader.swift */; };
 		136EDB8F30A8C93F00B3EC5B /* ManageModelsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDB8C30A8C93F00B3EC5B /* ManageModelsWindowController.swift */; };
 		136EDB9030A8C93F00B3EC5B /* ModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDB8D30A8C93F00B3EC5B /* ModelCatalog.swift */; };
 		136EDB9330A8C99100B3EC5B /* ggml-tiny.en-q8_0.bin in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB9130A8C99100B3EC5B /* ggml-tiny.en-q8_0.bin */; };
 		136EDB9430A8C99100B3EC5B /* ggml-base.en-q8_0.bin in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB9230A8C99100B3EC5B /* ggml-base.en-q8_0.bin */; };
+		136EDB9630A8D82C00B3EC5B /* AboutWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDB9530A8D82C00B3EC5B /* AboutWindowController.swift */; };
+		136EDB9B30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Color_1024.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB9730A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Color_1024.png */; };
+		136EDB9C30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Color_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB9830A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Color_44.png */; };
+		136EDB9D30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_White_44_v2.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB9930A8DA4400B3EC5B /* Push_to_Dictate_Keycap_White_44_v2.png */; };
+		136EDB9E30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Black_44_v2.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDB9A30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Black_44_v2.png */; };
 		13743FE630A2D8EB00FAC440 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FD930A2D8EB00FAC440 /* AppDelegate.swift */; };
 		13743FE830A2D8EB00FAC440 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FDB30A2D8EB00FAC440 /* StatusItemController.swift */; };
 		13743FE930A2D8EB00FAC440 /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FDD30A2D8EB00FAC440 /* Preferences.swift */; };
@@ -39,11 +41,12 @@
 			dstPath = "";
 			dstSubfolderSpec = 7;
 			files = (
+				136EDB9B30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Color_1024.png in CopyFiles */,
+				136EDB9C30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Color_44.png in CopyFiles */,
+				136EDB9D30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_White_44_v2.png in CopyFiles */,
+				136EDB9E30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Black_44_v2.png in CopyFiles */,
 				136EDB9330A8C99100B3EC5B /* ggml-tiny.en-q8_0.bin in CopyFiles */,
 				136EDB9430A8C99100B3EC5B /* ggml-base.en-q8_0.bin in CopyFiles */,
-				136EDB8730A7985C00B3EC5B /* Push_to_Dictate_White_Menu_Bar_44.png in CopyFiles */,
-				136EDB8830A7985C00B3EC5B /* Push_to_Dictate_Color_Menu_Bar_44.png in CopyFiles */,
-				136EDB8930A7985C00B3EC5B /* Push_to_Dictate_Black_Menu_Bar_44.png in CopyFiles */,
 				136EDB8A30A7985C00B3EC5B /* push-to-dictate.icns in CopyFiles */,
 				136EDB7330A6BECD00B3EC5B /* whisper-cli in CopyFiles */,
 				136EDB7130A6BDBC00B3EC5B /* Licenses in CopyFiles */,
@@ -60,15 +63,17 @@
 		136EDB7230A6BECD00B3EC5B /* whisper-cli */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = "whisper-cli"; path = "vendor/whisper.cpp/build/bin/whisper-cli"; sourceTree = "<group>"; };
 		136EDB7630A6C4E900B3EC5B /* PreferencesWindowController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PreferencesWindowController.swift; sourceTree = "<group>"; };
 		136EDB8130A7858700B3EC5B /* Logger.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
-		136EDB8330A7985C00B3EC5B /* Push_to_Dictate_White_Menu_Bar_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_White_Menu_Bar_44.png; path = icons/Push_to_Dictate_White_Menu_Bar_44.png; sourceTree = "<group>"; };
-		136EDB8430A7985C00B3EC5B /* Push_to_Dictate_Color_Menu_Bar_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Color_Menu_Bar_44.png; path = icons/Push_to_Dictate_Color_Menu_Bar_44.png; sourceTree = "<group>"; };
-		136EDB8530A7985C00B3EC5B /* Push_to_Dictate_Black_Menu_Bar_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Black_Menu_Bar_44.png; path = icons/Push_to_Dictate_Black_Menu_Bar_44.png; sourceTree = "<group>"; };
 		136EDB8630A7985C00B3EC5B /* push-to-dictate.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; name = "push-to-dictate.icns"; path = "icons/push-to-dictate.icns"; sourceTree = "<group>"; };
 		136EDB8B30A8C93F00B3EC5B /* ModelDownloader.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ModelDownloader.swift; sourceTree = "<group>"; };
 		136EDB8C30A8C93F00B3EC5B /* ManageModelsWindowController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ManageModelsWindowController.swift; sourceTree = "<group>"; };
 		136EDB8D30A8C93F00B3EC5B /* ModelCatalog.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ModelCatalog.swift; sourceTree = "<group>"; };
 		136EDB9130A8C99100B3EC5B /* ggml-tiny.en-q8_0.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = "ggml-tiny.en-q8_0.bin"; path = "vendor/models/ggml-tiny.en-q8_0.bin"; sourceTree = "<group>"; };
 		136EDB9230A8C99100B3EC5B /* ggml-base.en-q8_0.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; name = "ggml-base.en-q8_0.bin"; path = "vendor/models/ggml-base.en-q8_0.bin"; sourceTree = "<group>"; };
+		136EDB9530A8D82C00B3EC5B /* AboutWindowController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AboutWindowController.swift; sourceTree = "<group>"; };
+		136EDB9730A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Color_1024.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Keycap_Color_1024.png; path = icons/Push_to_Dictate_Keycap_Color_1024.png; sourceTree = "<group>"; };
+		136EDB9830A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Color_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Keycap_Color_44.png; path = icons/Push_to_Dictate_Keycap_Color_44.png; sourceTree = "<group>"; };
+		136EDB9930A8DA4400B3EC5B /* Push_to_Dictate_Keycap_White_44_v2.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Keycap_White_44_v2.png; path = icons/Push_to_Dictate_Keycap_White_44_v2.png; sourceTree = "<group>"; };
+		136EDB9A30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Black_44_v2.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Keycap_Black_44_v2.png; path = icons/Push_to_Dictate_Keycap_Black_44_v2.png; sourceTree = "<group>"; };
 		13743FAB30A2D38700FAC440 /* push-to-dictate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "push-to-dictate.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		13743FD930A2D8EB00FAC440 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		13743FDA30A2D8EB00FAC440 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -96,11 +101,12 @@
 		13743FA230A2D38600FAC440 = {
 			isa = PBXGroup;
 			children = (
+				136EDB9A30A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Black_44_v2.png */,
+				136EDB9830A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Color_44.png */,
+				136EDB9730A8DA4400B3EC5B /* Push_to_Dictate_Keycap_Color_1024.png */,
+				136EDB9930A8DA4400B3EC5B /* Push_to_Dictate_Keycap_White_44_v2.png */,
 				136EDB9230A8C99100B3EC5B /* ggml-base.en-q8_0.bin */,
 				136EDB9130A8C99100B3EC5B /* ggml-tiny.en-q8_0.bin */,
-				136EDB8530A7985C00B3EC5B /* Push_to_Dictate_Black_Menu_Bar_44.png */,
-				136EDB8430A7985C00B3EC5B /* Push_to_Dictate_Color_Menu_Bar_44.png */,
-				136EDB8330A7985C00B3EC5B /* Push_to_Dictate_White_Menu_Bar_44.png */,
 				136EDB8630A7985C00B3EC5B /* push-to-dictate.icns */,
 				136EDB7230A6BECD00B3EC5B /* whisper-cli */,
 				136EDB7030A6BDBB00B3EC5B /* Licenses */,
@@ -125,6 +131,7 @@
 		13743FD830A2D8EB00FAC440 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				136EDB9530A8D82C00B3EC5B /* AboutWindowController.swift */,
 				136EDB6930A5757B00B3EC5B /* main.swift */,
 				13743FD930A2D8EB00FAC440 /* AppDelegate.swift */,
 				13743FDA30A2D8EB00FAC440 /* Info.plist */,
@@ -253,6 +260,7 @@
 				136EDB6A30A5757B00B3EC5B /* main.swift in Sources */,
 				13743FE630A2D8EB00FAC440 /* AppDelegate.swift in Sources */,
 				13743FE930A2D8EB00FAC440 /* Preferences.swift in Sources */,
+				136EDB9630A8D82C00B3EC5B /* AboutWindowController.swift in Sources */,
 				13743FEB30A2D8EB00FAC440 /* Transcriber.swift in Sources */,
 				136EDB9030A8C93F00B3EC5B /* ModelCatalog.swift in Sources */,
 			);
