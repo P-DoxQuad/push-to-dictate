@@ -27,7 +27,7 @@ final class PreferencesWindowController: NSWindowController,
     private let modelsFolderField = NSTextField()
     private let modelsFolderChooseButton = NSButton(title: "Choose…",
                                                     target: nil, action: nil)
-    private let modelsFolderClearButton = NSButton(title: "Clear",
+    private let modelsFolderClearButton = NSButton(title: "Default",
                                                    target: nil, action: nil)
     private let launchCheckbox = NSButton(checkboxWithTitle: "Launch at login",
                                           target: nil, action: nil)
@@ -39,11 +39,20 @@ final class PreferencesWindowController: NSWindowController,
         target: nil, action: nil)
     private let exportButton = NSButton(title: "Export…", target: nil, action: nil)
     private let importButton = NSButton(title: "Import…", target: nil, action: nil)
+    private let manageModelsButton = NSButton(title: "Manage Models…",
+                                              target: nil, action: nil)
+    private var manageModelsController: ManageModelsWindowController?
     private let threadsField = NSTextField()
     private let threadsStepper = NSStepper()
-    private let greedyCheckbox = NSButton(
-        checkboxWithTitle: "Greedy decoding (unchecked, beam search for best accuracy)",
+    private let beamField = NSTextField()
+    private let beamStepper = NSStepper()
+    private let saveDebugRecordingsCheckbox = NSButton(
+        checkboxWithTitle: "Save debug recordings (unchecked, discard after transcription)",
         target: nil, action: nil)
+    private let clearDebugRecordingsButton = NSButton(title: "Clear Debug Recordings…",
+                                                      target: nil, action: nil)
+    private let clearLogButton = NSButton(title: "Clear Log…",
+                                          target: nil, action: nil)
 
     // State
     private var inputDevices: [(uid: String, name: String)] = []
@@ -146,15 +155,30 @@ final class PreferencesWindowController: NSWindowController,
         apiKeyField.delegate = self
 
         threadsStepper.minValue = 1
-        threadsStepper.maxValue = 24
+        threadsStepper.maxValue = Double(ProcessInfo.processInfo.activeProcessorCount)
         threadsStepper.increment = 1
         threadsStepper.valueWraps = false
         threadsStepper.target = self
         threadsStepper.action = #selector(threadsStepperChanged)
         threadsField.delegate = self
 
-        greedyCheckbox.target = self
-        greedyCheckbox.action = #selector(greedyChanged)
+        beamStepper.minValue = 1
+        beamStepper.maxValue = 10
+        beamStepper.increment = 1
+        beamStepper.valueWraps = false
+        beamStepper.target = self
+        beamStepper.action = #selector(beamStepperChanged)
+        beamField.delegate = self
+
+        saveDebugRecordingsCheckbox.target = self
+        saveDebugRecordingsCheckbox.action = #selector(saveDebugRecordingsChanged)
+        clearDebugRecordingsButton.target = self
+        clearDebugRecordingsButton.action = #selector(clearDebugRecordings)
+        clearLogButton.target = self
+        clearLogButton.action = #selector(clearLog)
+
+        manageModelsButton.target = self
+        manageModelsButton.action = #selector(openManageModels)
     }
 
     // MARK: - Layout (split view)
@@ -259,9 +283,13 @@ final class PreferencesWindowController: NSWindowController,
         modelsFolderStack.spacing = 6
         modelsFolderStack.setHuggingPriority(.defaultLow, for: .horizontal)
 
+        let modelRowStack = NSStackView(views: [modelPopup, manageModelsButton])
+        modelRowStack.orientation = .horizontal
+        modelRowStack.spacing = 8
+
         transcriptionGrid = gridView(from: [
             [backendLabel, backendPopup, NSView()],
-            [modelLabel, modelPopup, NSView()],
+            [modelLabel, modelRowStack, NSView()],
             [modelsFolderLabel, modelsFolderStack, NSView()],
             [apiKeyLabel, apiKeyField, NSView()]
         ])
@@ -301,18 +329,39 @@ final class PreferencesWindowController: NSWindowController,
     private func buildAdvancedPane() -> NSView {
         let logEverythingLabel = NSTextField(labelWithString: "Logging:")
         let threadsLabel = NSTextField(labelWithString: "Transcription threads:")
-        let decodingLabel = NSTextField(labelWithString: "Decoding:")
+        let beamLabel = NSTextField(labelWithString: "Accuracy:")
+        let debugRecordingsLabel = NSTextField(labelWithString: "Debug recordings:")
 
         threadsField.translatesAutoresizingMaskIntoConstraints = false
         threadsField.widthAnchor.constraint(equalToConstant: 60).isActive = true
-        let threadsRow = NSStackView(views: [threadsField, threadsStepper])
+        let threadsHint = NSTextField(labelWithString: PreferencesWindowController.threadsHintString())
+        threadsHint.textColor = .secondaryLabelColor
+        let threadsRow = NSStackView(views: [threadsField, threadsStepper, threadsHint])
         threadsRow.orientation = .horizontal
-        threadsRow.spacing = 4
+        threadsRow.spacing = 8
+
+        beamField.translatesAutoresizingMaskIntoConstraints = false
+        beamField.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        let beamHint = NSTextField(labelWithString: "1 = greedy (fastest) · 5 = default · 10 = thorough (slowest)")
+        beamHint.textColor = .secondaryLabelColor
+        let beamRow = NSStackView(views: [beamField, beamStepper, beamHint])
+        beamRow.orientation = .horizontal
+        beamRow.spacing = 8
+
+        let debugRow = NSStackView(views: [saveDebugRecordingsCheckbox,
+                                           clearDebugRecordingsButton])
+        debugRow.orientation = .horizontal
+        debugRow.spacing = 12
+
+        let loggingRow = NSStackView(views: [logEverythingCheckbox, clearLogButton])
+        loggingRow.orientation = .horizontal
+        loggingRow.spacing = 12
 
         return gridView(from: [
             [threadsLabel, threadsRow, NSView()],
-            [decodingLabel, greedyCheckbox, NSView()],
-            [logEverythingLabel, logEverythingCheckbox, NSView()]
+            [beamLabel, beamRow, NSView()],
+            [debugRecordingsLabel, debugRow, NSView()],
+            [logEverythingLabel, loggingRow, NSView()]
         ])
     }
 
@@ -364,7 +413,7 @@ final class PreferencesWindowController: NSWindowController,
         apiKeyField.stringValue = Preferences.shared.openAIAPIKey
         let stored = Preferences.shared.modelsDirectory
         modelsFolderField.stringValue = stored.isEmpty
-            ? (Bundle.main.resourcePath ?? "")
+            ? Preferences.userModelsDirectory.path
             : stored
         launchCheckbox.state = LaunchAtLogin.isEnabled ? .on : .off
         logEverythingCheckbox.state = Preferences.shared.logEverything ? .on : .off
@@ -372,7 +421,10 @@ final class PreferencesWindowController: NSWindowController,
         let threads = Preferences.shared.transcriptionThreads
         threadsField.integerValue = threads
         threadsStepper.integerValue = threads
-        greedyCheckbox.state = Preferences.shared.greedyDecoding ? .on : .off
+        let beam = Preferences.shared.beamSize
+        beamField.integerValue = beam
+        beamStepper.integerValue = beam
+        saveDebugRecordingsCheckbox.state = Preferences.shared.saveDebugRecordings ? .on : .off
         updateConditionalRows()
     }
 
@@ -386,6 +438,14 @@ final class PreferencesWindowController: NSWindowController,
         let stop = Preferences.shared.stopSound
         if names.contains(start) { startSoundPopup.selectItem(withTitle: start) }
         if names.contains(stop)  { stopSoundPopup.selectItem(withTitle: stop) }
+    }
+
+    private static func threadsHintString() -> String {
+        let logical = ProcessInfo.processInfo.activeProcessorCount
+        let low = max(1, logical / 3)
+        let high = max(low, logical / 2)
+        let range = low == high ? "\(low)" : "\(low)–\(high)"
+        return "Max: \(logical) · Recommended: \(range)"
     }
 
     private static func availableSystemSounds() -> [String] {
@@ -483,18 +543,16 @@ final class PreferencesWindowController: NSWindowController,
 
     private func discoverModels() -> [String] {
         var names = Set<String>()
-        let override = Preferences.shared.modelsDirectory
-        let searchURL: URL? = override.isEmpty
-            ? Bundle.main.resourceURL
-            : URL(fileURLWithPath: override, isDirectory: true)
-        guard let root = searchURL,
-              let items = try? FileManager.default.contentsOfDirectory(
-                at: root, includingPropertiesForKeys: nil) else {
-            return []
-        }
-        for url in items where url.pathExtension == "bin"
-            && url.lastPathComponent.hasPrefix("ggml-") {
-            names.insert(url.lastPathComponent)
+        var roots: [URL] = []
+        if let bundle = Bundle.main.resourceURL { roots.append(bundle) }
+        roots.append(Preferences.writableModelsDirectory)
+        for root in roots {
+            guard let items = try? FileManager.default.contentsOfDirectory(
+                    at: root, includingPropertiesForKeys: nil) else { continue }
+            for url in items where url.pathExtension == "bin"
+                && url.lastPathComponent.hasPrefix("ggml-") {
+                names.insert(url.lastPathComponent)
+            }
         }
         return names.sorted()
     }
@@ -554,8 +612,70 @@ final class PreferencesWindowController: NSWindowController,
         Preferences.shared.transcriptionThreads = value
     }
 
-    @objc private func greedyChanged() {
-        Preferences.shared.greedyDecoding = (greedyCheckbox.state == .on)
+    @objc private func beamStepperChanged() {
+        let value = beamStepper.integerValue
+        beamField.integerValue = value
+        Preferences.shared.beamSize = value
+    }
+
+    @objc private func saveDebugRecordingsChanged() {
+        Preferences.shared.saveDebugRecordings = (saveDebugRecordingsCheckbox.state == .on)
+    }
+
+    @objc private func openManageModels() {
+        let controller = manageModelsController ?? ManageModelsWindowController()
+        manageModelsController = controller
+        controller.onDidChange = { [weak self] in self?.refreshModelPopup() }
+        controller.refreshAll()
+        guard let sheet = controller.window, let parent = window else { return }
+        parent.beginSheet(sheet) { [weak self] _ in
+            self?.refreshModelPopup()
+        }
+    }
+
+    @objc private func clearLog() {
+        let fm = FileManager.default
+        let url = Logger.logFileURL
+        let attrs = try? fm.attributesOfItem(atPath: url.path)
+        let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+        guard size > 0 else {
+            let alert = NSAlert()
+            alert.messageText = "Log is already empty."
+            alert.informativeText = url.path
+            alert.runModal()
+            return
+        }
+        let confirm = NSAlert()
+        confirm.messageText = "Clear the log?"
+        confirm.informativeText = "This permanently empties:\n\(url.path)"
+        confirm.addButton(withTitle: "Clear")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        Logger.clear()
+    }
+
+    @objc private func clearDebugRecordings() {
+        let fm = FileManager.default
+        let dir = Preferences.debugRecordingsDirectory
+        let files = (try? fm.contentsOfDirectory(at: dir,
+                                                 includingPropertiesForKeys: nil)) ?? []
+        let wavs = files.filter { $0.pathExtension.lowercased() == "wav" }
+        guard !wavs.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "No debug recordings to clear."
+            alert.informativeText = dir.path
+            alert.runModal()
+            return
+        }
+        let confirm = NSAlert()
+        confirm.messageText = "Delete \(wavs.count) debug recording\(wavs.count == 1 ? "" : "s")?"
+        confirm.informativeText = "This permanently removes every .wav in:\n\(dir.path)"
+        confirm.addButton(withTitle: "Delete")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        for url in wavs {
+            try? fm.removeItem(at: url)
+        }
     }
 
     @objc private func exportPreferences() {
@@ -665,18 +785,22 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.openAIAPIKey = apiKeyField.stringValue
         } else if (obj.object as? NSTextField) === modelsFolderField {
             let text = modelsFolderField.stringValue
-            // Treat text matching the bundle's own Resources path as "no override"
-            // so moving the app later doesn't leave a stale absolute path baked in.
-            if text == (Bundle.main.resourcePath ?? "<impossible>") {
+            // Text matching the default writable location is equivalent to "no override".
+            if text == Preferences.userModelsDirectory.path {
                 Preferences.shared.modelsDirectory = ""
             } else {
                 Preferences.shared.modelsDirectory = text
             }
             refreshModelPopup()
         } else if (obj.object as? NSTextField) === threadsField {
-            let value = max(1, min(24, threadsField.integerValue))
+            let logical = ProcessInfo.processInfo.activeProcessorCount
+            let value = max(1, min(logical, threadsField.integerValue))
             threadsStepper.integerValue = value
             Preferences.shared.transcriptionThreads = value
+        } else if (obj.object as? NSTextField) === beamField {
+            let value = max(1, min(10, beamField.integerValue))
+            beamStepper.integerValue = value
+            Preferences.shared.beamSize = value
         }
     }
 
@@ -699,7 +823,7 @@ final class PreferencesWindowController: NSWindowController,
     }
 
     @objc private func clearModelsFolder() {
-        modelsFolderField.stringValue = Bundle.main.resourcePath ?? ""
+        modelsFolderField.stringValue = Preferences.userModelsDirectory.path
         Preferences.shared.modelsDirectory = ""
         refreshModelPopup()
     }

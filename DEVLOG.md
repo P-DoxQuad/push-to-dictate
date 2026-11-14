@@ -124,7 +124,11 @@ API key stays in the Keychain (`kSecClassGenericPassword`, service `push-to-dict
 - **Silent recording detection** — see Phase 3.
 - **Logger** (`Core/Logger.swift`) — two levels, both always `NSLog`'d; `.error` always written to file, `.info` written to file only when `Preferences.logEverything` is on. File at `~/Library/Application Support/push-to-dictate/logs/push-to-dictate.log`, one-line append per event, writes serialized on a dedicated queue.
 - **Move-to-Applications prompt** — first launch from outside `/Applications/`, `~/Applications/`, or an Xcode DerivedData path shows an `NSAlert` offering to move. "Don't Ask Again" persists via `Preferences.suppressedMoveToApplicationsPrompt`. On "Move", `FileManager` moves the bundle and a detached `/bin/sh` relaunch script `open`s the new copy after a 1 s sleep.
-- **Transcription speed tuning** — `Preferences.transcriptionThreads` (default 6, range 1–24) and `Preferences.greedyDecoding` (default on). Threads surfaced as a stepper + field under Preferences → Advanced; greedy as a checkbox. Greedy appends `-bs 1 -bo 1` to the `whisper-cli` invocation, skipping beam search and best-of reranking. Both are read at transcribe time so changes take effect on the next dictation. `PreferencesWindowController` conforms to `NSMenuDelegate` and rescans the models folder in `menuNeedsUpdate(_:)` so newly dropped model files appear on the next click without reopening the window.
+- **Transcription speed tuning** — `Preferences.transcriptionThreads` (stepper + field under Preferences → Advanced, 1 to the host's logical CPU count, default 6; hint reads *Max: N · Recommended: ⅓–½ of max*) and `Preferences.beamSize` (stepper + field, 1–10, default 5, user-facing label "Accuracy" with hint *1 = greedy (fastest) · 5 = default · 10 = thorough (slowest)*). Both get appended to the `whisper-cli` invocation as `-t`, `-bs`, `-bo` (beam-size doubles as best-of). Both read at transcribe time so changes take effect on the next dictation. `PreferencesWindowController` conforms to `NSMenuDelegate` and rescans the models folder in `menuNeedsUpdate(_:)` so newly dropped model files appear on the next click without reopening the window.
+- **Debug-recording toggle** — `Preferences.saveDebugRecordings` (default **off**) gates the `AudioRecorder` WAV writer. `~/Library/Application Support/push-to-dictate/debug/` no longer accumulates files during normal use. A **Clear Debug Recordings…** button in Preferences → Advanced empties the folder on demand with a count-and-confirm alert.
+- **Log maintenance** — **Clear Log…** button in Preferences → Advanced truncates `push-to-dictate.log` through `Logger.clear()`. `Logger.logFileURL` is exposed statically so the UI can show the path in the confirmation alert.
+- **Model management** — `Prefs/ModelCatalog.swift` defines a fixed catalog of four Q8_0 models (tiny.en, base.en, small.en, medium.en) with filename, display name, size, HuggingFace URL, and an `isBundled: Bool` that is authoritative (tiny.en + base.en are always "Bundled" in the UI regardless of filesystem state). `Prefs/ModelDownloader.swift` drives a `URLSessionDownloadTask` per download, verifies the `ggml`/`lmgg` magic header before writing to the destination, and reports progress + completion through closures. `Prefs/ManageModelsWindowController.swift` is the UI — opened from a **Manage Models…** button next to the Local model popup via `beginSheet(_:completionHandler:)`. Layout: fixed catalog section (one row per entry — name, size, status, action button), fixed "Custom models" header, scrollable list of any `ggml-*.bin` files in the writable folder that aren't in the catalog, fixed bottom with a custom-URL text field + Download button, **Reveal Models Folder**, and **Close**. The progress bar for a download overlays the status-label slot so nothing shifts when a download starts.
+- **Models-folder resolution rewrite** — bundled models are always discovered; `Preferences.modelsDirectory` (if set) only redirects the *writable* half, where downloads land and extras are read from. `Preferences.writableModelsDirectory` is `modelsDirectory` when set, otherwise `~/Library/Application Support/push-to-dictate/models/`. Picker scans *bundle ∪ writable* on every dropdown open. `whisperModelPath` resolves bundle first, then writable. Default `Preferences.localModelFilename` is `ggml-base.en-q8_0.bin` to match the new default bundled set. The **Clear** button on the Models folder field was renamed **Default** and resets the field to the writable default path.
 - **About / Credits dialog** — deferred.
 
 ---
@@ -518,4 +522,59 @@ Both prefs are read at transcribe time in `WhisperCppTranscriber.transcribe`, so
 - **Auto-detect thread default** via `sysctl hw.physicalcpu` at first launch instead of the current hardcoded 6.
 - **Bundling model variants** — currently only `ggml-small.en.bin` is in the Copy Files build phase. Need to decide whether to ship the full matrix (adds ~1.6 GB to the `.app`) or a curated subset (e.g. `base.en-q8_0` as the default plus `tiny.en-q8_0` and `small.en-q8_0` as alternates).
 - **Per-app override for injection method** (paste vs typed).
+- **About / Credits dialog.**
+
+### 2026-11-14 — Model management, debug toggles, decoding knob
+
+Three threads of work landed in the same session.
+
+#### Beam-size preference replaced the greedy-decoding checkbox
+
+Yesterday's "Greedy decoding" checkbox was really a 1-vs-5 toggle on whisper-cli's `-bs`/`-bo`. Promoted to a full stepper (1–10, default 5). User-facing label is **Accuracy** (plain-English for what varying beam width actually trades off), hint reads `1 = greedy (fastest) · 5 = default · 10 = thorough (slowest)`. `Preferences.beamSize` (Int) replaces `Preferences.greedyDecoding`. `WhisperCppTranscriber` now always appends `-bs N -bo N` with the configured value; the old conditional is gone.
+
+Threads field grew a hint too: `Max: <logical CPU count> · Recommended: ⅓–½ of max` (computed from `ProcessInfo.processInfo.activeProcessorCount`). Stepper max now equals logical CPU count instead of hardcoded 24.
+
+#### Debug toggles under Advanced
+
+- `Preferences.saveDebugRecordings` (default **off**) gates `AudioRecorder`'s WAV writer. Debug WAVs were never used for transcription — the transcriber writes its own temp file — so skipping them entirely was the clean fix. **Clear Debug Recordings…** button next to the checkbox empties the folder with a count-and-confirm alert.
+- **Clear Log…** button next to the "Log everything" checkbox. `Logger` grew a `clear()` method (truncates on the serialized write queue) and exposed `logFileURL` so the UI can show the path.
+
+#### Model management
+
+Single biggest piece of the session. Three new files under `Prefs/`:
+
+- `ModelCatalog.swift` — `CatalogModel` struct (`displayName`, `filename`, `sizeBytes`, `url: URL?`, `isBundled: Bool`) and a fixed four-entry `ModelCatalog.entries`: `tiny.en-q8_0` (bundled), `base.en-q8_0` (bundled), `small.en-q8_0`, `medium.en-q8_0`. `ModelLocator` resolves status (`.bundled` / `.downloaded(URL)` / `.available`) and lists "extra" downloaded filenames (anything in the writable folder that isn't in the catalog).
+- `ModelDownloader.swift` — `URLSessionDownloadTask` wrapped in a class with `onProgress` and `onComplete` closures. `DownloadResult` is a local enum (Swift 4.2 predates stdlib `Result`). Verifies the `ggml` / `lmgg` magic header before moving the temp download to its destination.
+- `ManageModelsWindowController.swift` — programmatic AppKit window shown via `beginSheet`. Layout: fixed "Available transcription models" header + four catalog rows + separator + fixed "Custom models" header + scrollable list (240 pt tall) of extras + separator + fixed custom-URL field + Download button + Reveal Models Folder / Close footer. `ModelRowView` is a horizontal stack of name / size / status / action-button. The status slot is a container holding both an `NSTextField` and an `NSProgressIndicator` pinned to the same frame, visibility toggled so the progress bar appears *in place of* the status label during a download — nothing shifts horizontally.
+
+Button logic:
+- Catalog entry with `isBundled = true` → status "Bundled", action disabled, regardless of filesystem.
+- Catalog entry with `isBundled = false` and present in writable folder → status "Downloaded", action "Delete".
+- Catalog entry not present → status "Not downloaded", action "Download".
+- Custom (non-catalog) filename in writable folder → row rendered under the scrollable "Custom models" section, action "Delete".
+- Any row during download → status slot becomes the progress bar, action becomes "Cancel".
+
+Entry point: **Manage Models…** button next to the Local model popup in Preferences → Transcription. `onDidChange` closure refreshes the popup after any catalog change.
+
+#### Models-folder resolution rewrite (behind the UI)
+
+Previously `Preferences.modelsDirectory` was an override that *replaced* the bundle lookup. That was wrong for the model-management flow: the bundle is always present and should always be scanned, regardless of where downloads live. Fixed:
+
+- `Preferences.writableModelsDirectory` static: returns the `modelsDirectory` override if set, else `~/Library/Application Support/push-to-dictate/models/` (`Preferences.userModelsDirectory`). This is where downloads go and where "extras" are read from.
+- `whisperModelPath` resolves bundle first, then the writable location.
+- `discoverModels()` always scans **bundle ∪ writable**, every dropdown open, even when the user has set an override. The bundle is never skipped — even if conceptually immutable, the picker should reflect the current filesystem so manually added or removed files inside the bundle still show up.
+- Models-folder field default visual is now `Preferences.userModelsDirectory.path`, not `Bundle.main.resourcePath`. The **Clear** button next to it was renamed **Default** since that's what it actually does.
+- Default `Preferences.localModelFilename` moved from `ggml-small.en.bin` to `ggml-base.en-q8_0.bin` to match the intended bundled set.
+
+#### Pending user action in Xcode
+
+- Add three new Swift files (`ModelCatalog.swift`, `ModelDownloader.swift`, `ManageModelsWindowController.swift`) to the `push-to-dictate` target under the `Prefs` group.
+- Update the Copy Files build phase: remove `vendor/models/ggml-small.en.bin`, add `vendor/models/ggml-tiny.en-q8_0.bin` and `vendor/models/ggml-base.en-q8_0.bin`.
+
+#### Deferred (still Phase 8 scope)
+
+- **Direct `libwhisper` linkage** — unchanged from previous entry.
+- **Streaming / chunked transcription** — unchanged.
+- **Auto-detect thread default** — unchanged.
+- **Per-app override for injection method.**
 - **About / Credits dialog.**

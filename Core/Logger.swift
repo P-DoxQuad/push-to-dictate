@@ -11,10 +11,16 @@ enum Logger {
     // Serialize all file writes so appends from different threads don't interleave.
     private static let queue = DispatchQueue(label: "push-to-dictate.logger")
 
-    private static var logFileURL: URL {
+    static var logFileURL: URL {
         return Preferences.defaultSupportDirectory
             .appendingPathComponent("logs", isDirectory: true)
             .appendingPathComponent("push-to-dictate.log")
+    }
+
+    static func clear() {
+        queue.sync {
+            try? Data().write(to: logFileURL, options: [.atomic])
+        }
     }
 
     static func error(_ title: String, detail: String) {

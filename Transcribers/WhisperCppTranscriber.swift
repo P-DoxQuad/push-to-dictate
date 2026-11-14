@@ -84,19 +84,18 @@ final class WhisperCppTranscriber: Transcriber {
         }
 
         let prefs = Preferences.shared
+        let beam = String(prefs.beamSize)
         let process = Process()
         process.executableURL = executableURL
-        var args = [
+        process.arguments = [
             "-m", modelURL.path,
             "-f", wavURL.path,
             "-l", language,
             "-t", String(prefs.transcriptionThreads),
+            "-bs", beam,
+            "-bo", beam,
             "-nt"
         ]
-        if prefs.greedyDecoding {
-            args.append(contentsOf: ["-bs", "1", "-bo", "1"])
-        }
-        process.arguments = args
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()

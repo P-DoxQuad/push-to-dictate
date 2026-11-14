@@ -29,7 +29,8 @@ final class Preferences {
         static let useColoredMenuBarIcon = "useColoredMenuBarIcon"
         static let suppressedMoveToApplicationsPrompt = "suppressedMoveToApplicationsPrompt"
         static let transcriptionThreads = "transcriptionThreads"
-        static let greedyDecoding = "greedyDecoding"
+        static let beamSize = "beamSize"
+        static let saveDebugRecordings = "saveDebugRecordings"
     }
 
     static let noSoundName = "None"
@@ -57,7 +58,7 @@ final class Preferences {
     }
 
     var localModelFilename: String {
-        get { return defaults.string(forKey: Key.localModelFilename) ?? "ggml-small.en.bin" }
+        get { return defaults.string(forKey: Key.localModelFilename) ?? "ggml-base.en-q8_0.bin" }
         set { defaults.set(newValue, forKey: Key.localModelFilename) }
     }
 
@@ -120,26 +121,51 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.transcriptionThreads) }
     }
 
-    var greedyDecoding: Bool {
+    var beamSize: Int {
         get {
-            if defaults.object(forKey: Key.greedyDecoding) == nil { return true }
-            return defaults.bool(forKey: Key.greedyDecoding)
+            let stored = defaults.integer(forKey: Key.beamSize)
+            return stored == 0 ? 5 : stored
         }
-        set { defaults.set(newValue, forKey: Key.greedyDecoding) }
+        set { defaults.set(newValue, forKey: Key.beamSize) }
+    }
+
+    var saveDebugRecordings: Bool {
+        get { return defaults.bool(forKey: Key.saveDebugRecordings) }
+        set { defaults.set(newValue, forKey: Key.saveDebugRecordings) }
+    }
+
+    static var debugRecordingsDirectory: URL {
+        return defaultSupportDirectory.appendingPathComponent("debug", isDirectory: true)
     }
 
     var whisperModelPath: String {
         let filename = localModelFilename
-        if !modelsDirectory.isEmpty {
-            return (modelsDirectory as NSString).appendingPathComponent(filename)
-        }
         let stem = (filename as NSString).deletingPathExtension
         let ext = (filename as NSString).pathExtension
         if let bundled = Bundle.main.url(forResource: stem,
                                          withExtension: ext.isEmpty ? nil : ext) {
             return bundled.path
         }
+        let writable = Preferences.writableModelsDirectory
+            .appendingPathComponent(filename).path
+        if FileManager.default.fileExists(atPath: writable) {
+            return writable
+        }
         return (Bundle.main.resourcePath ?? "") + "/\(filename)"
+    }
+
+    static var userModelsDirectory: URL {
+        return defaultSupportDirectory.appendingPathComponent("models", isDirectory: true)
+    }
+
+    /// Where downloaded (non-bundled) models live. The user's `modelsDirectory`
+    /// override if set, otherwise the default app-support models folder.
+    static var writableModelsDirectory: URL {
+        let override = Preferences.shared.modelsDirectory
+        if !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return userModelsDirectory
     }
 
     var openAIAPIKey: String {
@@ -209,7 +235,8 @@ final class Preferences {
         Key.startSound, Key.stopSound, Key.modelsDirectory,
         Key.logEverything, Key.useColoredMenuBarIcon,
         Key.suppressedMoveToApplicationsPrompt,
-        Key.transcriptionThreads, Key.greedyDecoding
+        Key.transcriptionThreads, Key.beamSize,
+        Key.saveDebugRecordings
     ]
 
     // MARK: - Keychain

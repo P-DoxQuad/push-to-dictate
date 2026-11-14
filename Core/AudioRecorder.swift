@@ -67,7 +67,8 @@ final class AudioRecorder {
         converter = nil
         outputFormat = nil
 
-        if !captured.isEmpty, let url = writeDebugWav(samples: captured) {
+        if !captured.isEmpty, Preferences.shared.saveDebugRecordings,
+           let url = writeDebugWav(samples: captured) {
             onCaptureSaved?(url)
         }
 
