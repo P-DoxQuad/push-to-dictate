@@ -24,6 +24,12 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
     private var dotTimer: Timer?
     private var errorClearTimer: Timer?
 
+    private var welcomePopover: NSPopover?
+    private var welcomeDismissTimer: Timer?
+    private var hoverShowTimer: Timer?
+    private var hoverHideTimer: Timer?
+    private var hoverTracker: HoverTracker?
+
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
@@ -33,6 +39,8 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         configureAudio()
         observeAppearanceChanges()
         promptForAccessibilityIfNeeded()
+        installHoverTracking()
+        maybeShowWelcomePopover()
     }
 
     private func configureButton() {
@@ -417,6 +425,110 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         }
     }
 
+    private func maybeShowWelcomePopover() {
+        if Preferences.shared.didShowWelcomeTooltip { return }
+        // Delay so any launch-time alerts (Accessibility, Move to Applications)
+        // have a chance to come and go before the popover tries to anchor.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            guard let self = self else { return }
+            self.showInfoPopover(autoDismissAfter: 12)
+            Preferences.shared.didShowWelcomeTooltip = true
+        }
+    }
+
+    private func showInfoPopover(autoDismissAfter seconds: TimeInterval?) {
+        guard let button = statusItem.button, button.window != nil else { return }
+        if welcomePopover?.isShown == true { return }
+
+        let hotkey = PreferencesWindowController.describe(
+            keyCode: Preferences.shared.hotkeyKeyCode,
+            flags: Preferences.shared.hotkeyModifierFlags
+        )
+
+        let title = NSTextField(labelWithString: "Push to Dictate")
+        title.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
+
+        let body = NSTextField(wrappingLabelWithString:
+            "Press \(hotkey) to start dictation. Click the icon for more options.")
+        body.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+
+        let stack = NSStackView(views: [title, body])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+
+        let container = NSViewController()
+        container.view = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 80))
+        container.view.addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.view.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: container.view.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.view.bottomAnchor),
+            body.widthAnchor.constraint(equalToConstant: 272)
+        ])
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = container
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        welcomePopover = popover
+
+        welcomeDismissTimer?.invalidate()
+        if let seconds = seconds {
+            welcomeDismissTimer = Timer.scheduledTimer(withTimeInterval: seconds,
+                                                       repeats: false) { [weak self] _ in
+                self?.dismissInfoPopover()
+            }
+        }
+    }
+
+    @objc private func dismissInfoPopover() {
+        welcomeDismissTimer?.invalidate()
+        welcomeDismissTimer = nil
+        welcomePopover?.performClose(nil)
+        welcomePopover = nil
+    }
+
+    private func installHoverTracking() {
+        guard let button = statusItem.button else { return }
+        let tracker = HoverTracker(
+            onEnter: { [weak self] in self?.scheduleHoverShow() },
+            onExit: { [weak self] in self?.scheduleHoverHide() }
+        )
+        hoverTracker = tracker
+        let area = NSTrackingArea(
+            rect: button.bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: tracker,
+            userInfo: nil
+        )
+        button.addTrackingArea(area)
+    }
+
+    private func scheduleHoverShow() {
+        hoverHideTimer?.invalidate()
+        hoverHideTimer = nil
+        if welcomePopover?.isShown == true { return }
+        hoverShowTimer?.invalidate()
+        hoverShowTimer = Timer.scheduledTimer(withTimeInterval: 1.5,
+                                              repeats: false) { [weak self] _ in
+            self?.showInfoPopover(autoDismissAfter: nil)
+        }
+    }
+
+    private func scheduleHoverHide() {
+        hoverShowTimer?.invalidate()
+        hoverShowTimer = nil
+        hoverHideTimer?.invalidate()
+        hoverHideTimer = Timer.scheduledTimer(withTimeInterval: 0.3,
+                                              repeats: false) { [weak self] _ in
+            self?.dismissInfoPopover()
+        }
+    }
+
     @objc private func toggleDictation() {
         setRecording(!isRecording)
     }
@@ -449,4 +561,20 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         toggleModeItem.state = (current == .toggle) ? .on : .off
         pushToTalkModeItem.state = (current == .pushToTalk) ? .on : .off
     }
+}
+
+private final class HoverTracker: NSResponder {
+    private let onEnter: () -> Void
+    private let onExit: () -> Void
+
+    init(onEnter: @escaping () -> Void, onExit: @escaping () -> Void) {
+        self.onEnter = onEnter
+        self.onExit = onExit
+        super.init()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseEntered(with event: NSEvent) { onEnter() }
+    override func mouseExited(with event: NSEvent) { onExit() }
 }

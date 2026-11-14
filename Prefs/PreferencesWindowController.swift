@@ -927,7 +927,7 @@ final class PreferencesWindowController: NSWindowController,
         return flags
     }
 
-    private static func describe(keyCode: Int, flags: CGEventFlags) -> String {
+    static func describe(keyCode: Int, flags: CGEventFlags) -> String {
         var parts: [String] = []
         if flags.contains(.maskControl)   { parts.append("⌃") }
         if flags.contains(.maskAlternate) { parts.append("⌥") }

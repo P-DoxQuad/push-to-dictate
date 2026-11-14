@@ -32,6 +32,7 @@ final class Preferences {
         static let beamSize = "beamSize"
         static let saveDebugRecordings = "saveDebugRecordings"
         static let didAutoSelectModel = "didAutoSelectModel"
+        static let didShowWelcomeTooltip = "didShowWelcomeTooltip"
     }
 
     static let noSoundName = "None"
@@ -140,6 +141,11 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.didAutoSelectModel) }
     }
 
+    var didShowWelcomeTooltip: Bool {
+        get { return defaults.bool(forKey: Key.didShowWelcomeTooltip) }
+        set { defaults.set(newValue, forKey: Key.didShowWelcomeTooltip) }
+    }
+
     static var debugRecordingsDirectory: URL {
         return defaultSupportDirectory.appendingPathComponent("debug", isDirectory: true)
     }
@@ -242,7 +248,8 @@ final class Preferences {
         Key.logEverything, Key.useColoredMenuBarIcon,
         Key.suppressedMoveToApplicationsPrompt,
         Key.transcriptionThreads, Key.beamSize,
-        Key.saveDebugRecordings, Key.didAutoSelectModel
+        Key.saveDebugRecordings, Key.didAutoSelectModel,
+        Key.didShowWelcomeTooltip
     ]
 
     // MARK: - Keychain

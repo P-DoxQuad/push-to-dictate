@@ -624,3 +624,14 @@ Progress-bar overlay logic unchanged: during a download both the dot and the lab
 #### Picker coloring
 
 Preferences → Transcription Local model popup now colors every `ggml-*.bin` entry — both the dropdown list and the currently-selected display — to match the Manage Models recommendation dot (green/orange/red for catalog, `.labelColor` for custom). First attempt set `attributedTitle` on `NSPopUpButtonCell` which doesn't take on 10.13 — the cell draws from the selected `NSMenuItem`. Fixed by setting `attributedTitle` on each `NSMenuItem` directly. Applied in `refreshModelPopup` (after items are added and selection restored) and after `modelChanged`.
+
+### 2026-11-14 — Welcome / hover popover
+
+Menu-bar icon now has a bound `NSPopover` tooltip. Content: title "Push to Dictate" + body "Press <hotkey> to start dictation. Click the icon for more options." Hotkey string pulled dynamically from `Preferences` via the now-internal `PreferencesWindowController.describe(keyCode:flags:)`.
+
+Two triggers:
+
+- **First launch** — fires 1.2 s after `StatusItemController.init` (the delay lets the Accessibility and Move-to-Applications alerts resolve first). Auto-dismisses after 12 s. `Preferences.didShowWelcomeTooltip` flips to true so it never fires again on launch; included in `allUserDefaultsKeys` so a backup restore preserves the "already seen it" state.
+- **Hover** — `NSTrackingArea` installed on the status item's button with a tiny `HoverTracker: NSResponder` as owner (forwards `mouseEntered` / `mouseExited` to closures on the controller). Mouse enters → 1.5 s show timer. Exits → 0.3 s hide timer (grace period absorbs flicker when the cursor briefly leaves and comes back). No auto-dismiss on hover; mouse-exit handles it.
+
+Single popover instance reused for both paths. `showInfoPopover(autoDismissAfter:)` guards on `welcomePopover?.isShown` so overlapping triggers can't produce two popovers. `.transient` behavior so clicking anywhere outside dismisses, and clicking the icon itself opens the menu normally (menu takes focus, popover closes).
