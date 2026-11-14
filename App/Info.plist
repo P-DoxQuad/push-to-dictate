@@ -23,7 +23,9 @@
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
-    <string>10.13</string>
+    <string>10.11</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Push to Dictate records your voice to transcribe speech into text.</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHumanReadableCopyright</key>

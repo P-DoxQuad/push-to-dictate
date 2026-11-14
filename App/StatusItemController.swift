@@ -1,6 +1,8 @@
 import Cocoa
+import UserNotifications
 
-final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
+final class StatusItemController: NSObject,
+                                  NSUserNotificationCenterDelegate {
 
     // Peak RMS below this across the whole recording = treat as silence,
     // skip transcription. Normal speech sits around 0.05–0.3; room noise
@@ -41,6 +43,9 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         promptForAccessibilityIfNeeded()
         installHoverTracking()
         maybeShowWelcomePopover()
+        if #available(macOS 10.14, *) {
+            requestModernNotificationAuthorization()
+        }
     }
 
     private func configureButton() {
@@ -57,12 +62,12 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
     private func currentMenuBarImage() -> NSImage? {
         let base: NSImage?
         if Preferences.shared.useColoredMenuBarIcon {
-            base = NSImage(named: NSImage.Name("Push_to_Dictate_Keycap_Color_44"))
+            base = NSImage(named: "Push_to_Dictate_Keycap_Color_44")
         } else {
             let isDark = isDarkMenuBar()
             let name = isDark ? "Push_to_Dictate_Keycap_White_44"
                               : "Push_to_Dictate_Keycap_Black_44"
-            base = NSImage(named: NSImage.Name(name))
+            base = NSImage(named: name)
         }
         guard let image = base else { return nil }
         let sized = image.copy() as? NSImage ?? image
@@ -107,17 +112,17 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
 
         switch state {
         case .recording, .processing:
-            dotTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) {
-                [weak self] _ in
-                self?.dotVisible.toggle()
-                self?.refreshMenuBarIcon()
-            }
+            dotTimer = Timer.scheduledTimer(timeInterval: 0.5,
+                                            target: self,
+                                            selector: #selector(dotTick),
+                                            userInfo: nil,
+                                            repeats: true)
         case .error:
-            errorClearTimer = Timer.scheduledTimer(withTimeInterval: 5.0,
-                                                   repeats: false) {
-                [weak self] _ in
-                self?.setIconState(.idle)
-            }
+            errorClearTimer = Timer.scheduledTimer(timeInterval: 5.0,
+                                                   target: self,
+                                                   selector: #selector(errorClearTick),
+                                                   userInfo: nil,
+                                                   repeats: false)
         case .idle:
             break
         }
@@ -335,16 +340,44 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
     private func showError(title: String, detail: String) {
         Logger.error(title, detail: detail)
         setIconState(.error)
+        if #available(macOS 10.14, *) {
+            postModernNotification(title: title, body: detail)
+        } else {
+            postLegacyNotification(title: title, body: detail)
+        }
+    }
+
+    private func postLegacyNotification(title: String, body: String) {
         let notification = NSUserNotification()
         notification.title = title
-        notification.informativeText = detail
+        notification.informativeText = body
         NSUserNotificationCenter.default.delegate = self
         NSUserNotificationCenter.default.deliver(notification)
     }
 
+    @available(macOS 10.14, *)
+    private func postModernNotification(title: String, body: String) {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        let request = UNNotificationRequest(identifier: UUID().uuidString,
+                                            content: content,
+                                            trigger: nil)
+        center.add(request, withCompletionHandler: nil)
+    }
+
+    @available(macOS 10.14, *)
+    private func requestModernNotificationAuthorization() {
+        UNUserNotificationCenter.current().requestAuthorization(
+            options: [.alert, .sound]
+        ) { _, _ in }
+    }
+
     private func playSound(_ name: String) {
         guard name != Preferences.noSoundName,
-              let sound = NSSound(named: NSSound.Name(name)) else { return }
+              let sound = NSSound(named: name) else { return }
         sound.play()
     }
 
@@ -445,11 +478,20 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
             flags: Preferences.shared.hotkeyModifierFlags
         )
 
-        let title = NSTextField(labelWithString: "Push to Dictate")
+        let title = NSTextField(frame: .zero)
+        title.isEditable = false; title.isSelectable = false
+        title.isBordered = false; title.drawsBackground = false
+        title.stringValue = "Push to Dictate"
         title.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
 
-        let body = NSTextField(wrappingLabelWithString:
-            "Press \(hotkey) to start dictation. Click the icon for more options.")
+        let body = NSTextField(frame: .zero)
+        body.isEditable = false; body.isSelectable = false
+        body.isBordered = false; body.drawsBackground = false
+        body.stringValue = "Press \(hotkey) to start dictation. Click the icon for more options."
+        body.lineBreakMode = .byWordWrapping
+        body.cell?.wraps = true
+        body.cell?.isScrollable = false
+        body.preferredMaxLayoutWidth = 268
         body.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
 
         let stack = NSStackView(views: [title, body])
@@ -478,10 +520,12 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
 
         welcomeDismissTimer?.invalidate()
         if let seconds = seconds {
-            welcomeDismissTimer = Timer.scheduledTimer(withTimeInterval: seconds,
-                                                       repeats: false) { [weak self] _ in
-                self?.dismissInfoPopover()
-            }
+            welcomeDismissTimer = Timer.scheduledTimer(
+                timeInterval: seconds,
+                target: self,
+                selector: #selector(welcomeDismissTick),
+                userInfo: nil,
+                repeats: false)
         }
     }
 
@@ -513,20 +557,45 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         hoverHideTimer = nil
         if welcomePopover?.isShown == true { return }
         hoverShowTimer?.invalidate()
-        hoverShowTimer = Timer.scheduledTimer(withTimeInterval: 1.5,
-                                              repeats: false) { [weak self] _ in
-            self?.showInfoPopover(autoDismissAfter: nil)
-        }
+        hoverShowTimer = Timer.scheduledTimer(
+            timeInterval: 1.5,
+            target: self,
+            selector: #selector(hoverShowTick),
+            userInfo: nil,
+            repeats: false)
     }
 
     private func scheduleHoverHide() {
         hoverShowTimer?.invalidate()
         hoverShowTimer = nil
         hoverHideTimer?.invalidate()
-        hoverHideTimer = Timer.scheduledTimer(withTimeInterval: 0.3,
-                                              repeats: false) { [weak self] _ in
-            self?.dismissInfoPopover()
-        }
+        hoverHideTimer = Timer.scheduledTimer(
+            timeInterval: 0.3,
+            target: self,
+            selector: #selector(hoverHideTick),
+            userInfo: nil,
+            repeats: false)
+    }
+
+    @objc private func dotTick() {
+        dotVisible.toggle()
+        refreshMenuBarIcon()
+    }
+
+    @objc private func errorClearTick() {
+        setIconState(.idle)
+    }
+
+    @objc private func welcomeDismissTick() {
+        dismissInfoPopover()
+    }
+
+    @objc private func hoverShowTick() {
+        showInfoPopover(autoDismissAfter: nil)
+    }
+
+    @objc private func hoverHideTick() {
+        dismissInfoPopover()
     }
 
     @objc private func toggleDictation() {
@@ -560,6 +629,27 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         let current = Preferences.shared.hotkeyMode
         toggleModeItem.state = (current == .toggle) ? .on : .off
         pushToTalkModeItem.state = (current == .pushToTalk) ? .on : .off
+    }
+}
+
+// MARK: - UNUserNotificationCenterDelegate (macOS 10.14+)
+
+@available(macOS 10.14, *)
+extension StatusItemController: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler
+                                    completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.alert, .sound])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        if iconState == .error {
+            setIconState(.idle)
+        }
+        completionHandler()
     }
 }
 

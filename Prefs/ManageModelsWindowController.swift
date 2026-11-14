@@ -5,8 +5,15 @@ final class ManageModelsWindowController: NSWindowController {
 
     private let customStack = NSStackView()
     private let customURLField = NSTextField()
-    private let emptyCustomLabel = NSTextField(labelWithString:
-        "No custom models downloaded yet.")
+    private let emptyCustomLabel: NSTextField = {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false
+        f.isSelectable = false
+        f.isBordered = false
+        f.drawsBackground = false
+        f.stringValue = "No custom models downloaded yet."
+        return f
+    }()
     private var rowViews: [String: ModelRowView] = [:]
     private var extraRowViews: [String: ModelRowView] = [:]
 
@@ -40,7 +47,12 @@ final class ManageModelsWindowController: NSWindowController {
         ])
 
         // Fixed catalog section.
-        let catalogHeader = NSTextField(labelWithString: "Available transcription models")
+        let catalogHeader = NSTextField(frame: .zero)
+        catalogHeader.isEditable = false
+        catalogHeader.isSelectable = false
+        catalogHeader.isBordered = false
+        catalogHeader.drawsBackground = false
+        catalogHeader.stringValue = "Available transcription models"
         catalogHeader.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
         outer.addArrangedSubview(catalogHeader)
 
@@ -61,7 +73,12 @@ final class ManageModelsWindowController: NSWindowController {
                                               constant: -40).isActive = true
 
         // Fixed "Custom models" header above the scroll area.
-        let customHeader = NSTextField(labelWithString: "Custom models")
+        let customHeader = NSTextField(frame: .zero)
+        customHeader.isEditable = false
+        customHeader.isSelectable = false
+        customHeader.isBordered = false
+        customHeader.drawsBackground = false
+        customHeader.stringValue = "Custom models"
         customHeader.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
         outer.addArrangedSubview(customHeader)
 
@@ -107,13 +124,20 @@ final class ManageModelsWindowController: NSWindowController {
         divider.widthAnchor.constraint(equalTo: outer.widthAnchor,
                                        constant: -40).isActive = true
 
-        let customLabel = NSTextField(labelWithString: "Download a custom model from a URL:")
+        let customLabel = NSTextField(frame: .zero)
+        customLabel.isEditable = false
+        customLabel.isSelectable = false
+        customLabel.isBordered = false
+        customLabel.drawsBackground = false
+        customLabel.stringValue = "Download a custom model from a URL:"
         outer.addArrangedSubview(customLabel)
 
         customURLField.placeholderString = "https://.../ggml-your-model.bin"
-        let customDownload = NSButton(title: "Download",
-                                       target: self,
-                                       action: #selector(downloadCustom))
+        let customDownload = NSButton(frame: .zero)
+        customDownload.bezelStyle = .rounded
+        customDownload.title = "Download"
+        customDownload.target = self
+        customDownload.action = #selector(downloadCustom)
         let customRow = NSStackView(views: [customURLField, customDownload])
         customRow.orientation = .horizontal
         customRow.spacing = 8
@@ -123,12 +147,16 @@ final class ManageModelsWindowController: NSWindowController {
         customRow.widthAnchor.constraint(equalTo: outer.widthAnchor,
                                          constant: -40).isActive = true
 
-        let revealButton = NSButton(title: "Reveal Models Folder",
-                                    target: self,
-                                    action: #selector(revealModelsFolder))
-        let closeButton = NSButton(title: "Close",
-                                   target: self,
-                                   action: #selector(closeSheet))
+        let revealButton = NSButton(frame: .zero)
+        revealButton.bezelStyle = .rounded
+        revealButton.title = "Reveal Models Folder"
+        revealButton.target = self
+        revealButton.action = #selector(revealModelsFolder)
+        let closeButton = NSButton(frame: .zero)
+        closeButton.bezelStyle = .rounded
+        closeButton.title = "Close"
+        closeButton.target = self
+        closeButton.action = #selector(closeSheet)
         closeButton.keyEquivalent = "\r"
         let footerSpacer = NSView()
         footerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -338,13 +366,38 @@ private final class DotView: NSView {
 private final class ModelRowView: NSView {
     private let entry: CatalogModel
 
-    private let nameLabel = NSTextField(labelWithString: "")
-    private let sizeLabel = NSTextField(labelWithString: "")
+    private let nameLabel: NSTextField = {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false; f.isSelectable = false
+        f.isBordered = false; f.drawsBackground = false
+        return f
+    }()
+    private let sizeLabel: NSTextField = {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false; f.isSelectable = false
+        f.isBordered = false; f.drawsBackground = false
+        return f
+    }()
     private let statusDot = DotView()
-    private let statusLabel = NSTextField(labelWithString: "")
+    private let statusLabel: NSTextField = {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false; f.isSelectable = false
+        f.isBordered = false; f.drawsBackground = false
+        return f
+    }()
     private let progressBar = NSProgressIndicator()
-    private let useButton = NSButton(title: "", target: nil, action: nil)
-    private let actionButton = NSButton(title: "", target: nil, action: nil)
+    private let useButton: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .rounded
+        b.title = ""
+        return b
+    }()
+    private let actionButton: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .rounded
+        b.title = ""
+        return b
+    }()
 
     private weak var activeDownloader: ModelDownloader?
 
