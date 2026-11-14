@@ -21,11 +21,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let path = Bundle.main.bundleURL.path
         let home = NSHomeDirectory()
 
-        // Already installed — nothing to do.
+        // Already installed, nothing to do.
         if path.hasPrefix("/Applications/") || path.hasPrefix(home + "/Applications/") {
             return
         }
-        // Developer build — don't nag during Xcode run cycles.
+        // Developer build: don't nag during Xcode run cycles.
         if path.contains("/DerivedData/") || path.contains("/Developer/Xcode/") {
             return
         }

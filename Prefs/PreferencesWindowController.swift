@@ -250,7 +250,7 @@ final class PreferencesWindowController: NSWindowController,
         clearLogButton.action = #selector(clearLog)
     }
 
-    // MARK: - Layout — split view (sidebar + content)
+    // MARK: - Layout (split view: sidebar + content)
 
     private func buildLayout() {
         guard let contentView = window?.contentView else { return }

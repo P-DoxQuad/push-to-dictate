@@ -704,3 +704,20 @@ Supported-platforms section updated: macOS 10.11 El Capitan through macOS 15 Seq
 - Add `Core/NSTextField+Compat.swift` was created then deleted later in the session as the inline approach replaced it — reference should be removed from the project if still present.
 
 If the El Capitan target holds up on test hardware, merge back to `main` as `1.1.0`.
+
+### 2026-11-14 — In-app Help window and misc polish
+
+Added a menu-bar Help item that opens a scrollable in-app reference. `App/HelpWindowController.swift` holds a non-editable `NSTextView` inside an `NSScrollView` with a Close button. Content is a manually-assembled `NSAttributedString` (no Markdown parsing: `NSAttributedString.init(markdown:)` is 12+ and unusable on this deployment target) built from bold headings + body paragraphs with `NSMutableParagraphStyle` for spacing. Sections, in order: Permissions, Starting and stopping dictation, Changing the hotkey, Audio input, Transcription models, Local or cloud, Text insertion, Launch at login, Backup and restore, Troubleshooting. Permissions is first because the hotkey won't work without Accessibility.
+
+The current hotkey description is pulled live from `Preferences.shared` via `PreferencesWindowController.describe(keyCode:flags:)`, so the Help text reflects whatever binding is active.
+
+Menu item: "Help" with `⌘?` key equivalent, placed above About.
+
+Also in this pass:
+
+- Em-dashes removed from every remaining Swift code comment (CLAUDE.md rule covers all output including comments; this swept the last stragglers in `AppDelegate`, `StatusItemController`, `ModelCatalog`, `PreferencesWindowController`, `ManageModelsWindowController`).
+- Preferences → Advanced checkbox labels shortened: "Save debug recordings (unchecked, discard after transcription)" to "Save debug recordings"; "Log everything (unchecked, errors only)" to "Log everything". The parenthetical was pushing the adjacent Clear button too far right.
+- Preferences → Advanced "Clear Debug Recordings…" button relabeled "Clear Recordings…" to free the same space.
+- Preferences → Advanced Accuracy hint shortened from "1 = greedy (fastest) · 5 = default · 10 = thorough (slowest)" to "1 = fastest · 5 = default · 10 = slowest".
+- Preferences → Transcription pane rewrapped in a vertical `NSStackView` of `buildRowView`-produced row containers so hiding `transcriptionModelRow`/`transcriptionModelsFolderRow`/`transcriptionApiKeyRow` when the backend switches to OpenAI collapses the row *and* its inter-row spacing. Previously the API-key row sat where the folder row had been, leaving a visible gap.
+- `README.md` picked up a "Menu bar menu" section describing the status-item menu items, including the new Help entry.

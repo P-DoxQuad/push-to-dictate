@@ -132,7 +132,7 @@ enum ModelCatalog {
         let recommended = present.filter {
             ModelRecommendation.rate(minTier: $0.minTier) == .recommended
         }
-        // Prefer the highest minTier that's still Recommended — that's the best quality
+        // Prefer the highest minTier that's still Recommended: the best quality
         // the host can comfortably run.
         if let best = recommended.max(by: { $0.minTier < $1.minTier }) {
             return best
@@ -140,7 +140,7 @@ enum ModelCatalog {
         return entries.first(where: { $0.isBundled }) ?? entries[0]
     }
 
-    /// Color for the model popup label — matches the Manage Models dot color.
+    /// Color for the model popup label. Matches the Manage Models dot color.
     /// Returns `nil` for filenames not in the catalog (custom models have no rating).
     static func color(forFilename filename: String) -> NSColor? {
         guard let entry = entries.first(where: { $0.filename == filename }) else {

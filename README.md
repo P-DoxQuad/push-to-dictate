@@ -87,6 +87,10 @@ Per-model rating (Recommended, Slow, Not recommended) is derived from AVX2 and F
 
 Implemented. Not yet verified end-to-end against a live API key. The multipart upload path compiles and the Keychain entry for the API key is defined.
 
+## Menu bar menu
+
+Clicking the status-bar icon reveals: Start/Stop Dictation, Mode submenu (Toggle / Push-to-talk), Preferences, Help, About, Quit. Help opens an in-app scrollable window covering permissions, hotkey usage, models, backends, and troubleshooting.
+
 ## Preferences categories
 
 - **General**: hotkey, launch at login, preferences backup export/import.

@@ -23,6 +23,7 @@
 		136EDBAC30A8F57200B3EC5B /* Push_to_Dictate_Keycap_Color_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDBA830A8F57200B3EC5B /* Push_to_Dictate_Keycap_Color_44.png */; };
 		136EDBAD30A8F57200B3EC5B /* Push_to_Dictate_Keycap_White_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDBA930A8F57200B3EC5B /* Push_to_Dictate_Keycap_White_44.png */; };
 		136EDBAE30A8F57200B3EC5B /* Push_to_Dictate_Keycap_Black_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDBAA30A8F57200B3EC5B /* Push_to_Dictate_Keycap_Black_44.png */; };
+		136EDBC330A9286800B3EC5B /* HelpWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDBC230A9286800B3EC5B /* HelpWindowController.swift */; };
 		13743FE630A2D8EB00FAC440 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FD930A2D8EB00FAC440 /* AppDelegate.swift */; };
 		13743FE830A2D8EB00FAC440 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FDB30A2D8EB00FAC440 /* StatusItemController.swift */; };
 		13743FE930A2D8EB00FAC440 /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FDD30A2D8EB00FAC440 /* Preferences.swift */; };
@@ -74,6 +75,7 @@
 		136EDBA830A8F57200B3EC5B /* Push_to_Dictate_Keycap_Color_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Keycap_Color_44.png; path = icons/Push_to_Dictate_Keycap_Color_44.png; sourceTree = "<group>"; };
 		136EDBA930A8F57200B3EC5B /* Push_to_Dictate_Keycap_White_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Keycap_White_44.png; path = icons/Push_to_Dictate_Keycap_White_44.png; sourceTree = "<group>"; };
 		136EDBAA30A8F57200B3EC5B /* Push_to_Dictate_Keycap_Black_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Keycap_Black_44.png; path = icons/Push_to_Dictate_Keycap_Black_44.png; sourceTree = "<group>"; };
+		136EDBC230A9286800B3EC5B /* HelpWindowController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HelpWindowController.swift; sourceTree = "<group>"; };
 		13743FAB30A2D38700FAC440 /* push-to-dictate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "push-to-dictate.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		13743FD930A2D8EB00FAC440 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		13743FDA30A2D8EB00FAC440 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -131,6 +133,7 @@
 		13743FD830A2D8EB00FAC440 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				136EDBC230A9286800B3EC5B /* HelpWindowController.swift */,
 				136EDB9530A8D82C00B3EC5B /* AboutWindowController.swift */,
 				136EDB6930A5757B00B3EC5B /* main.swift */,
 				13743FD930A2D8EB00FAC440 /* AppDelegate.swift */,
@@ -262,6 +265,7 @@
 				13743FE930A2D8EB00FAC440 /* Preferences.swift in Sources */,
 				136EDB9630A8D82C00B3EC5B /* AboutWindowController.swift in Sources */,
 				13743FEB30A2D8EB00FAC440 /* Transcriber.swift in Sources */,
+				136EDBC330A9286800B3EC5B /* HelpWindowController.swift in Sources */,
 				136EDB9030A8C93F00B3EC5B /* ModelCatalog.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

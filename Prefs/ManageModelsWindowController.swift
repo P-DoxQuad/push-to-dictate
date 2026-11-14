@@ -250,7 +250,7 @@ final class ManageModelsWindowController: NSWindowController {
                 self?.finishedDownload(entry: entry, destination: dest, result: result)
             }
         } else {
-            // Custom URL path — no row view, just an alert on completion.
+            // Custom URL path: no row view, just an alert on completion.
             downloader.onComplete = { [weak self] result in
                 self?.finishedCustomDownload(destination: dest, result: result)
             }

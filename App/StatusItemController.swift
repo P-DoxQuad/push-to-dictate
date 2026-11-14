@@ -171,7 +171,7 @@ final class StatusItemController: NSObject,
         }
     }
 
-    // User clicked the notification banner — clear the error tint early.
+    // User clicked the notification banner. Clear the error tint early.
     func userNotificationCenter(_ center: NSUserNotificationCenter,
                                 didActivate notification: NSUserNotification) {
         if iconState == .error {
@@ -235,6 +235,12 @@ final class StatusItemController: NSObject,
                                keyEquivalent: ",")
         prefs.target = self
         menu.addItem(prefs)
+
+        let help = NSMenuItem(title: "Help",
+                              action: #selector(openHelp),
+                              keyEquivalent: "?")
+        help.target = self
+        menu.addItem(help)
 
         let about = NSMenuItem(title: "About Push to Dictate",
                                action: #selector(openAbout),
@@ -623,6 +629,10 @@ final class StatusItemController: NSObject,
 
     @objc private func openAbout() {
         AboutWindowController.shared.show()
+    }
+
+    @objc private func openHelp() {
+        HelpWindowController.shared.show()
     }
 
     private func syncModeMenuState() {
