@@ -1,34 +1,115 @@
-# push-to-dictate
+# Push to Dictate
 
-A menu-bar dictation utility for macOS. Activates on a global hotkey, transcribes speech, and inserts the text into whatever field currently has keyboard focus.
+Menu-bar dictation application for macOS. A configurable global hotkey activates audio capture. On release, captured audio is transcribed and inserted into the focused text field via synthesized paste or keystroke events.
 
-## Target platform
+Runs on CPU. No GPU, Neural Engine, or network connection is used by the local backend.
 
-- macOS 10.13 High Sierra
-- Mac Pro 5,1 (Xeon, 32 GB DDR3, RX 580) — reference hardware
-- Built with Xcode 10.1 / Swift 4.2
+## Version
 
-## Features (planned)
+1.0.
 
-- Menu-bar resident app (no Dock icon, no main window)
-- Global hotkey with two modes:
-  - **Toggle** (default): tap to start, tap again to stop and transcribe
-  - **Push-to-talk**: hold to record, release to transcribe
-- Swappable transcription backend:
-  - **Local** — [whisper.cpp](https://github.com/ggerganov/whisper.cpp) running on CPU
-  - **Remote** — OpenAI Whisper API (`whisper-1`)
-- Text insertion via synthetic paste (default) or synthesized keystrokes (fallback)
-- Preferences for hotkey, mode, backend, local model selection, and API key (stored in Keychain)
+## Supported platforms
 
-## Status
+- macOS 10.13 High Sierra and newer.
+- Intel x86_64 CPUs. Builds for Mac Pro 5,1-class hardware without AVX / AVX2 / FMA / F16C. SSE4.2 used.
+- Apple Silicon not currently targeted (deployment target precedes macOS 11).
 
-Pre-scaffold. See `DEVLOG.md` for the build plan.
+## Capabilities
 
-## Required permissions
+- Global hotkey. Default `⌃⌥Space`. Configurable in Preferences.
+- Two activation modes: Toggle (tap on, tap off) and Push-to-talk (hold to record, release to transcribe).
+- Local transcription backend: [whisper.cpp](https://github.com/ggerganov/whisper.cpp) v1.7.2 compiled with SSE4.2 only, Accelerate BLAS auto-detected.
+- Remote transcription backend: OpenAI Whisper API (`whisper-1`).
+- Text insertion methods: pasteboard (default) or synthetic Unicode keystrokes.
+- Model catalog with hardware-aware per-model rating.
+- Custom model download via arbitrary `ggml-*.bin` URL.
+- Preferences backup and restore to plist.
 
-- **Accessibility** — for the global event tap and synthetic keystroke injection
-- Microphone access is not prompted on High Sierra (that dialog was introduced in macOS 10.14)
+## Installation
+
+### Pre-built application
+
+`Push to Dictate-1.0.zip` is attached to each release at https://github.com/P-DoxQuad/push-to-dictate/releases. The archive expands to `Push to Dictate.app`. Installation location: `/Applications/`.
+
+### Build from source
+
+Requires Xcode 10.1+ and CMake (MacPorts `cmake` or system).
+
+```
+git clone https://github.com/P-DoxQuad/push-to-dictate.git
+cd push-to-dictate
+./scripts/setup.sh
+open push-to-dictate.xcodeproj
+```
+
+`scripts/setup.sh` is idempotent. It clones whisper.cpp at the pinned commit into `vendor/whisper.cpp/`, runs CMake with the no-AVX flags, compiles `whisper-cli`, and downloads `ggml-tiny.en-q8_0.bin` and `ggml-base.en-q8_0.bin` into `vendor/models/`.
+
+The Xcode `push-to-dictate` scheme produces `Push to Dictate.app` in its DerivedData `Build/Products/` directory.
+
+## Permissions
+
+- **Accessibility**: required for `CGEventTap` (global hotkey capture) and `CGEvent.post` (synthesized keystroke injection). First launch presents an alert and opens System Preferences → Security & Privacy → Privacy → Accessibility.
+- Microphone permission: not applicable. The macOS 10.13 permission model does not include a microphone prompt.
+
+## Code signing
+
+Signed with the `Sign to Run Locally` identity. Apple Developer Program signing and notarization require a deployment target newer than 10.13.
+
+On first launch of a bundle not built on the current machine, Gatekeeper rejects it with "cannot be opened because the developer cannot be verified". Finder right-click → Open bypasses this prompt. The acknowledgment persists per machine.
+
+## Bundled models
+
+Shipped inside `Push to Dictate.app/Contents/Resources/`:
+
+| Filename                        | Size   |
+|---------------------------------|--------|
+| `ggml-tiny.en-q8_0.bin`         | 42 MB  |
+| `ggml-base.en-q8_0.bin`         | 78 MB  |
+
+Default `Preferences.localModelFilename` resolves to `ggml-base.en-q8_0.bin`. First-launch auto-selection picks the highest-tier model that is rated Recommended for the host CPU and is already on disk.
+
+## Downloadable models
+
+Exposed through Preferences → Transcription → Manage Models:
+
+| Filename                             | Size   |
+|--------------------------------------|--------|
+| `ggml-small.en-q8_0.bin`             | 252 MB |
+| `ggml-medium.en-q8_0.bin`            | 785 MB |
+| `ggml-large-v3-turbo-q8_0.bin`       | 834 MB |
+
+Download target: `~/Library/Application Support/push-to-dictate/models/`. Overridable via `Preferences.modelsDirectory`. A custom-URL field accepts any `ggml-*.bin`.
+
+Per-model rating (Recommended, Slow, Not recommended) is derived from AVX2 and FMA support (via `sysctl hw.optional.*`) and logical CPU count (via `ProcessInfo.activeProcessorCount`).
+
+## OpenAI backend
+
+Implemented. Not yet verified end-to-end against a live API key. The multipart upload path compiles and the Keychain entry for the API key is defined.
+
+## Preferences categories
+
+- **General**: hotkey, launch at login, preferences backup export/import.
+- **Transcription**: backend, local model, Manage Models, models folder override, OpenAI API key.
+- **Audio**: input device, start/stop sounds.
+- **Output**: text insertion method.
+- **Interface**: colored menu-bar icon toggle.
+- **Advanced**: transcription threads, accuracy (beam size), debug recording toggle, logging.
+
+Storage: `UserDefaults` for most values. OpenAI API key is stored in the Keychain under service `push-to-dictate`.
+
+## Repository layout
+
+```
+App/           AppKit entry points, status item, About, menu bar
+Core/          Hotkey monitor, audio capture, text injection, logger
+Transcribers/  Transcriber protocol, whisper.cpp and OpenAI implementations
+Prefs/         Preferences, Preferences window, Manage Models window, model catalog
+icons/         Source PNGs and generated .icns
+Licenses/      Third-party license texts, bundled into Resources
+scripts/       setup.sh for whisper.cpp vendoring and model fetch
+vendor/        Gitignored. Populated by setup.sh.
+```
 
 ## License
 
-TBD.
+TBD. Third-party components retain their original licenses. Full text: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

@@ -2,19 +2,28 @@
 
 Directives for working on this repo. Scope, and work history, are in `DEVLOG.md`, and `README.md`. `claude.local.md` has secrets only you need to know
 
-## Writing style for this file
+## Writing style
 
-- Directives, not narrative. No mission statements. No reinforcement loops. No journal entries.
+Applies to all project docs (CLAUDE.md, README.md, DEVLOG.md, THIRD_PARTY_NOTICES.md, in-repo notes, commit messages). Applies to any new documentation added later.
+
+- Directives and declarative statements. Not narrative.
+- Formal documentation register. Describe and explain. Never narrate.
+- No addressing the reader ("you", "your", "let me"). No meta-speech ("this document covers", "in this section we"). No TV-host or tour-guide voice.
+- No mission statements, reinforcement loops, or journal entries.
+- No marketing copy, inspirational framing, "designed to", or "built for people who".
 - Short imperatives. One rule per bullet.
 - Concrete and verifiable. Name the command, the file, or the flag.
-- Multi-step reference procedures go in `.claude/rules/*.md` or as skills. Not here.
+- Lists over paragraphs where the content is enumerable.
+- Technical terms as-is. Do not soften.
+- No em-dashes anywhere (docs, UI strings, commit messages, chat output). Use a colon, period, or regular hyphen instead. Em-dash use is an AI tell.
+- Multi-step reference procedures go in `.claude/rules/*.md` or as skills. Not in CLAUDE.md.
 
 ## Build
 
 - Xcode 10.1. Swift 4.2. Deployment target 10.13.
 - AppKit, menu-bar only. `LSUIElement = YES` in `Info.plist`.
-- Source layout: `App/`, `Core/`, `Transcribers/`, `Prefs/`, `Resources/`.
-- whisper.cpp: build `whisper-cli` for x86_64 from source. Models in `~/Library/Application Support/push-to-dictate/models/`.
+- Source layout: `App/`, `Core/`, `Transcribers/`, `Prefs/`, `icons/`.
+- whisper.cpp: pinned to v1.7.2. Build `whisper-cli` for x86_64 via `scripts/setup.sh`. Models bundled in `.app/Contents/Resources/`; writable fallback is `~/Library/Application Support/push-to-dictate/models/`.
 
 ## Code
 

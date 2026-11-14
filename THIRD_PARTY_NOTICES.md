@@ -16,10 +16,20 @@ Full license text: `Licenses/whisper.cpp-LICENSE.txt`
 ## Whisper (model)
 
 - Project: https://github.com/openai/whisper
-- Model files used: `ggml-small.en.bin` (and optionally other `ggml-*.bin` sizes)
 - License: MIT License
 - Copyright (c) 2022 OpenAI
 
-The `ggml-*.bin` files are format conversions of OpenAI's original Whisper model weights, redistributed by the whisper.cpp project under the same MIT license. Used as the speech-to-text model for the local backend.
+Bundled with the application:
+
+- `ggml-tiny.en-q8_0.bin`
+- `ggml-base.en-q8_0.bin`
+
+Also offered as optional downloads from within the application (fetched at runtime from Hugging Face):
+
+- `ggml-small.en-q8_0.bin`
+- `ggml-medium.en-q8_0.bin`
+- `ggml-large-v3-turbo-q8_0.bin`
+
+The `ggml-*.bin` files are format conversions and quantizations of OpenAI's original Whisper model weights, redistributed by the whisper.cpp project under the same MIT license. Used as the speech-to-text model for the local backend.
 
 Full license text: `Licenses/whisper-model-LICENSE.txt`
