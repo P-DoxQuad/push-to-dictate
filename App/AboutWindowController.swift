@@ -9,7 +9,7 @@ final class AboutWindowController: NSWindowController {
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
-        window.title = "About push-to-dictate"
+        window.title = "About Push to Dictate"
         window.isReleasedWhenClosed = false
         self.init(window: window)
         buildLayout()
@@ -33,7 +33,7 @@ final class AboutWindowController: NSWindowController {
         iconView.image = appIcon
         iconView.imageScaling = .scaleProportionallyUpOrDown
 
-        let nameLabel = NSTextField(labelWithString: "push-to-dictate")
+        let nameLabel = NSTextField(labelWithString: "Push to Dictate")
         nameLabel.font = NSFont.boldSystemFont(ofSize: 20)
         nameLabel.alignment = .center
 

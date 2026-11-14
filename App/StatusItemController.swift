@@ -39,7 +39,7 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         guard let button = statusItem.button else { return }
         button.image = currentMenuBarImage()
         button.imageScaling = .scaleProportionallyDown
-        button.toolTip = "push-to-dictate"
+        button.toolTip = "Push to Dictate"
     }
 
     func refreshMenuBarIcon() {
@@ -52,8 +52,8 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
             base = NSImage(named: NSImage.Name("Push_to_Dictate_Keycap_Color_44"))
         } else {
             let isDark = isDarkMenuBar()
-            let name = isDark ? "Push_to_Dictate_Keycap_White_44_v2"
-                              : "Push_to_Dictate_Keycap_Black_44_v2"
+            let name = isDark ? "Push_to_Dictate_Keycap_White_44"
+                              : "Push_to_Dictate_Keycap_Black_44"
             base = NSImage(named: NSImage.Name(name))
         }
         guard let image = base else { return nil }
@@ -223,7 +223,7 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         prefs.target = self
         menu.addItem(prefs)
 
-        let about = NSMenuItem(title: "About push-to-dictate",
+        let about = NSMenuItem(title: "About Push to Dictate",
                                action: #selector(openAbout),
                                keyEquivalent: "")
         about.target = self
@@ -404,10 +404,10 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
         let alert = NSAlert()
         alert.messageText = "Accessibility permission required"
         alert.informativeText =
-            "push-to-dictate needs Accessibility access to listen for its global hotkey " +
+            "Push to Dictate needs Accessibility access to listen for its global hotkey " +
             "and to insert transcribed text into other apps.\n\n" +
             "Open System Preferences → Security & Privacy → Privacy → Accessibility and " +
-            "add push-to-dictate, then relaunch the app."
+            "add Push to Dictate, then relaunch the app."
         alert.addButton(withTitle: "Open Accessibility Preferences")
         alert.addButton(withTitle: "Later")
         if alert.runModal() == .alertFirstButtonReturn {

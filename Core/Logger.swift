@@ -25,7 +25,7 @@ enum Logger {
 
     static func error(_ title: String, detail: String) {
         NSLog("push-to-dictate: ERROR: %@: %@", title, detail)
-        append(level: "ERROR", message: "\(title) — \(detail)")
+        append(level: "ERROR", message: "\(title): \(detail)")
     }
 
     static func info(_ message: String) {

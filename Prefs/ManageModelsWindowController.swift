@@ -459,7 +459,7 @@ private final class ModelRowView: NSView {
         statusLabel.textColor = rec.color
 
         if entry.isBundled {
-            actionButton.title = "—"
+            actionButton.title = "-"
             actionButton.isEnabled = false
             configureUseButton(available: true, isActive: isActive)
             return
@@ -475,7 +475,7 @@ private final class ModelRowView: NSView {
             actionButton.isEnabled = true
             configureUseButton(available: false, isActive: false)
         case .bundled:
-            actionButton.title = "—"
+            actionButton.title = "-"
             actionButton.isEnabled = false
             configureUseButton(available: true, isActive: isActive)
         }

@@ -77,7 +77,7 @@ final class PreferencesWindowController: NSWindowController,
             backing: .buffered,
             defer: false
         )
-        window.title = "push-to-dictate — Preferences"
+        window.title = "Push to Dictate Preferences"
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 640, height: 340)
         self.init(window: window)
@@ -694,7 +694,7 @@ final class PreferencesWindowController: NSWindowController,
 
     @objc private func exportPreferences() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "push-to-dictate-preferences.plist"
+        panel.nameFieldStringValue = "Push to Dictate Preferences.plist"
         panel.allowedFileTypes = ["plist"]
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
@@ -742,7 +742,7 @@ final class PreferencesWindowController: NSWindowController,
             let obj = try PropertyListSerialization.propertyList(from: data,
                                                                  options: [], format: nil)
             guard let payload = obj as? [String: Any] else {
-                presentBackupError("Invalid backup", detail: "File is not a push-to-dictate backup.")
+                presentBackupError("Invalid backup", detail: "File is not a Push to Dictate backup.")
                 return
             }
             if let dict = payload["userDefaults"] as? [String: Any] {

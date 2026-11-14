@@ -35,8 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let alert = NSAlert()
-        alert.messageText = "Move push-to-dictate to the Applications folder?"
-        alert.informativeText = "push-to-dictate works best when installed in /Applications/. " +
+        alert.messageText = "Move Push to Dictate to the Applications folder?"
+        alert.informativeText = "Push to Dictate works best when installed in /Applications/. " +
             "Moving it there now lets it launch cleanly, be kept out of Downloads, and remain in " +
             "a stable location for Launch-at-Login."
         alert.addButton(withTitle: "Move to Applications")
