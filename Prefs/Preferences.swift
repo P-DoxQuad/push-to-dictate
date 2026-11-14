@@ -27,6 +27,7 @@ final class Preferences {
         static let modelsDirectory = "modelsDirectory"
         static let logEverything = "logEverything"
         static let useColoredMenuBarIcon = "useColoredMenuBarIcon"
+        static let suppressedMoveToApplicationsPrompt = "suppressedMoveToApplicationsPrompt"
     }
 
     static let noSoundName = "None"
@@ -104,6 +105,11 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.useColoredMenuBarIcon) }
     }
 
+    var suppressedMoveToApplicationsPrompt: Bool {
+        get { return defaults.bool(forKey: Key.suppressedMoveToApplicationsPrompt) }
+        set { defaults.set(newValue, forKey: Key.suppressedMoveToApplicationsPrompt) }
+    }
+
     var whisperModelPath: String {
         let filename = localModelFilename
         if !modelsDirectory.isEmpty {
@@ -175,6 +181,17 @@ final class Preferences {
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
         return base.appendingPathComponent("push-to-dictate", isDirectory: true)
     }
+
+    // All UserDefaults keys we read/write. Used by the backup export/import.
+    // Deliberately omits openAIAPIKeyLegacy (only used for one-shot Keychain migration).
+    static let allUserDefaultsKeys: [String] = [
+        Key.backend, Key.hotkeyMode, Key.injectionMethod,
+        Key.localModelFilename, Key.hotkeyKeyCode, Key.hotkeyModifierFlags,
+        Key.whisperCliPath, Key.openAILanguage, Key.inputDeviceUID,
+        Key.startSound, Key.stopSound, Key.modelsDirectory,
+        Key.logEverything, Key.useColoredMenuBarIcon,
+        Key.suppressedMoveToApplicationsPrompt
+    ]
 
     // MARK: - Keychain
 

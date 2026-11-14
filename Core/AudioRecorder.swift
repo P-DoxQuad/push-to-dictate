@@ -8,6 +8,8 @@ final class AudioRecorder {
     var onLevel: ((Float) -> Void)?
     var onCaptureSaved: ((URL) -> Void)?
 
+    private(set) var peakRMS: Float = 0
+
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private var outputFormat: AVAudioFormat?
@@ -17,6 +19,7 @@ final class AudioRecorder {
     func start() throws {
         if engine.isRunning { return }
 
+        peakRMS = 0
         try applyPreferredInputDevice()
 
         let inputNode = engine.inputNode
@@ -75,6 +78,7 @@ final class AudioRecorder {
         guard let converter = converter, let outFormat = outputFormat else { return }
 
         let level = computeRMS(pcm)
+        if level > peakRMS { peakRMS = level }
         if let onLevel = onLevel {
             DispatchQueue.main.async { onLevel(level) }
         }

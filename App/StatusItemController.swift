@@ -1,6 +1,12 @@
 import Cocoa
 
 final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
+
+    // Peak RMS below this across the whole recording = treat as silence,
+    // skip transcription. Normal speech sits around 0.05–0.3; room noise
+    // and dead-air clips are well under 0.005.
+    private static let silentPeakThreshold: Float = 0.01
+
     private let statusItem: NSStatusItem
     private var toggleMenuItem: NSMenuItem!
     private var toggleModeItem: NSMenuItem!
@@ -272,8 +278,14 @@ final class StatusItemController: NSObject, NSUserNotificationCenterDelegate {
             playSound(Preferences.shared.startSound)
         } else {
             let samples = audioRecorder.stop()
+            let peak = audioRecorder.peakRMS
             playSound(Preferences.shared.stopSound)
-            transcribe(samples: samples)
+            if peak < StatusItemController.silentPeakThreshold {
+                Logger.info(String(format: "skipping transcription: silent recording (peak RMS %.4f)", peak))
+                setIconState(.idle)
+            } else {
+                transcribe(samples: samples)
+            }
         }
 
         isRecording = recording

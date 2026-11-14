@@ -1,11 +1,16 @@
 import Cocoa
 import CoreGraphics
 
-final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate {
+final class PreferencesWindowController: NSWindowController,
+                                         NSTextFieldDelegate,
+                                         NSTableViewDataSource,
+                                         NSTableViewDelegate {
     static let shared = PreferencesWindowController()
 
     var onHotkeyChanged: (() -> Void)?
+    var onColoredIconChanged: (() -> Void)?
 
+    // Controls
     private let hotkeyButton = NSButton(title: "", target: nil, action: nil)
     private let hotkeyStatusLabel = NSTextField(labelWithString: "")
     private let backendPopup = NSPopUpButton()
@@ -31,35 +36,44 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
     private let coloredIconCheckbox = NSButton(
         checkboxWithTitle: "Colored menu bar icon (unchecked, matches light/dark mode)",
         target: nil, action: nil)
+    private let exportButton = NSButton(title: "Export…", target: nil, action: nil)
+    private let importButton = NSButton(title: "Import…", target: nil, action: nil)
 
-    var onColoredIconChanged: (() -> Void)?
-
+    // State
     private var inputDevices: [(uid: String, name: String)] = []
     private var hotkeyMonitor: Any?
     private var isRecordingHotkey = false
 
-    private var grid: NSGridView!
-    private let modelRowIndex = 2
-    private let modelsFolderRowIndex = 3
-    private let apiKeyRowIndex = 4
+    // Split view / categories
+    private let categoryTitles = ["General", "Transcription", "Audio", "Output",
+                                  "Interface", "Advanced"]
+    private var categoryViews: [NSView] = []
+    private let sidebarTable = NSTableView()
+    private let contentContainer = NSView()
+    private var transcriptionGrid: NSGridView!
+    private let transcriptionModelRowIndex = 1
+    private let transcriptionModelsFolderRowIndex = 2
+    private let transcriptionApiKeyRowIndex = 3
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 500),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 400),
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "push-to-dictate — Preferences"
         window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 640, height: 340)
         self.init(window: window)
+        wireActions()
         buildLayout()
         refreshAll()
     }
 
     func showPreferences() {
         if let window = window {
-            window.center()
+            if !window.isVisible { window.center() }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -70,24 +84,9 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         super.close()
     }
 
-    // MARK: - Layout
+    // MARK: - Control wiring
 
-    private func buildLayout() {
-        guard let contentView = window?.contentView else { return }
-
-        let hotkeyLabel = NSTextField(labelWithString: "Hotkey:")
-        let backendLabel = NSTextField(labelWithString: "Backend:")
-        let modelLabel = NSTextField(labelWithString: "Local model:")
-        let modelsFolderLabel = NSTextField(labelWithString: "Models folder:")
-        let apiKeyLabel = NSTextField(labelWithString: "OpenAI API key:")
-        let injectionLabel = NSTextField(labelWithString: "Text insertion:")
-        let inputDeviceLabel = NSTextField(labelWithString: "Input device:")
-        let startSoundLabel = NSTextField(labelWithString: "Start sound:")
-        let stopSoundLabel = NSTextField(labelWithString: "Stop sound:")
-        let launchLabel = NSTextField(labelWithString: "Startup:")
-        let logEverythingLabel = NSTextField(labelWithString: "Logging:")
-        let appearanceLabel = NSTextField(labelWithString: "Appearance:")
-
+    private func wireActions() {
         hotkeyButton.bezelStyle = .rounded
         hotkeyButton.target = self
         hotkeyButton.action = #selector(hotkeyButtonClicked)
@@ -106,9 +105,6 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         injectionPasteRadio.action = #selector(injectionPasteSelected)
         injectionTypedRadio.target = self
         injectionTypedRadio.action = #selector(injectionTypedSelected)
-        let injectionStack = NSStackView(views: [injectionPasteRadio, injectionTypedRadio])
-        injectionStack.orientation = .horizontal
-        injectionStack.spacing = 16
 
         inputDevicePopup.target = self
         inputDevicePopup.action = #selector(inputDeviceChanged)
@@ -127,13 +123,117 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         coloredIconCheckbox.target = self
         coloredIconCheckbox.action = #selector(coloredIconChanged)
 
-        modelsFolderField.placeholderString =
-            Bundle.main.resourcePath ?? "Using bundled models"
+        exportButton.target = self
+        exportButton.action = #selector(exportPreferences)
+        importButton.target = self
+        importButton.action = #selector(importPreferences)
+
+        modelsFolderField.placeholderString = ""
         modelsFolderField.delegate = self
         modelsFolderChooseButton.target = self
         modelsFolderChooseButton.action = #selector(chooseModelsFolder)
         modelsFolderClearButton.target = self
         modelsFolderClearButton.action = #selector(clearModelsFolder)
+
+        apiKeyField.placeholderString = "sk-..."
+        apiKeyField.delegate = self
+    }
+
+    // MARK: - Layout (split view)
+
+    private func buildLayout() {
+        guard let contentView = window?.contentView else { return }
+
+        categoryViews = [
+            buildGeneralPane(),
+            buildTranscriptionPane(),
+            buildAudioPane(),
+            buildOutputPane(),
+            buildInterfacePane(),
+            buildAdvancedPane()
+        ]
+
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Category"))
+        column.title = ""
+        column.minWidth = 120
+        sidebarTable.addTableColumn(column)
+        sidebarTable.headerView = nil
+        sidebarTable.rowSizeStyle = .medium
+        sidebarTable.selectionHighlightStyle = .sourceList
+        sidebarTable.dataSource = self
+        sidebarTable.delegate = self
+        sidebarTable.allowsEmptySelection = false
+        sidebarTable.allowsMultipleSelection = false
+
+        let sidebarScroll = NSScrollView()
+        sidebarScroll.documentView = sidebarTable
+        sidebarScroll.hasVerticalScroller = true
+        sidebarScroll.hasHorizontalScroller = false
+        sidebarScroll.borderType = .noBorder
+        sidebarScroll.drawsBackground = false
+
+        let split = NSSplitView()
+        split.isVertical = true
+        split.dividerStyle = .thin
+        split.addArrangedSubview(sidebarScroll)
+        split.addArrangedSubview(contentContainer)
+        split.translatesAutoresizingMaskIntoConstraints = false
+
+        contentView.addSubview(split)
+        NSLayoutConstraint.activate([
+            split.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            split.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            split.topAnchor.constraint(equalTo: contentView.topAnchor),
+            split.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            sidebarScroll.widthAnchor.constraint(equalToConstant: 170)
+        ])
+
+        sidebarTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        showCategory(at: 0)
+    }
+
+    private func showCategory(at index: Int) {
+        for sub in contentContainer.subviews { sub.removeFromSuperview() }
+        guard index >= 0, index < categoryViews.count else { return }
+        let view = categoryViews[index]
+        view.translatesAutoresizingMaskIntoConstraints = false
+        contentContainer.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 20),
+            view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 20),
+            view.trailingAnchor.constraint(lessThanOrEqualTo: contentContainer.trailingAnchor, constant: -20),
+            view.bottomAnchor.constraint(lessThanOrEqualTo: contentContainer.bottomAnchor, constant: -20)
+        ])
+    }
+
+    private func gridView(from rows: [[NSView]]) -> NSGridView {
+        let grid = NSGridView(views: rows)
+        grid.rowSpacing = 12
+        grid.columnSpacing = 10
+        grid.column(at: 0).xPlacement = .trailing
+        return grid
+    }
+
+    private func buildGeneralPane() -> NSView {
+        let hotkeyLabel = NSTextField(labelWithString: "Hotkey:")
+        let launchLabel = NSTextField(labelWithString: "Startup:")
+        let backupLabel = NSTextField(labelWithString: "Backup:")
+        let backupStack = NSStackView(views: [exportButton, importButton])
+        backupStack.orientation = .horizontal
+        backupStack.spacing = 8
+        return gridView(from: [
+            [hotkeyLabel, hotkeyButton, hotkeyStatusLabel],
+            [launchLabel, launchCheckbox, NSView()],
+            [backupLabel, backupStack, NSView()]
+        ])
+    }
+
+    private func buildTranscriptionPane() -> NSView {
+        let backendLabel = NSTextField(labelWithString: "Backend:")
+        let modelLabel = NSTextField(labelWithString: "Local model:")
+        let modelsFolderLabel = NSTextField(labelWithString: "Models folder:")
+        let apiKeyLabel = NSTextField(labelWithString: "OpenAI API key:")
+
         let modelsFolderStack = NSStackView(views: [
             modelsFolderField, modelsFolderChooseButton, modelsFolderClearButton
         ])
@@ -141,37 +241,85 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         modelsFolderStack.spacing = 6
         modelsFolderStack.setHuggingPriority(.defaultLow, for: .horizontal)
 
-        apiKeyField.placeholderString = "sk-..."
-        apiKeyField.delegate = self
-
-        grid = NSGridView(views: [
-            [hotkeyLabel,       hotkeyButton,      hotkeyStatusLabel],
-            [backendLabel,      backendPopup,      NSView()],
-            [modelLabel,        modelPopup,        NSView()],
+        transcriptionGrid = gridView(from: [
+            [backendLabel, backendPopup, NSView()],
+            [modelLabel, modelPopup, NSView()],
             [modelsFolderLabel, modelsFolderStack, NSView()],
-            [apiKeyLabel,       apiKeyField,       NSView()],
-            [injectionLabel,    injectionStack,    NSView()],
-            [inputDeviceLabel,  inputDevicePopup,  NSView()],
-            [startSoundLabel,   startSoundPopup,   NSView()],
-            [stopSoundLabel,    stopSoundPopup,    NSView()],
-            [launchLabel,       launchCheckbox,    NSView()],
-            [logEverythingLabel, logEverythingCheckbox, NSView()],
-            [appearanceLabel,   coloredIconCheckbox,   NSView()]
+            [apiKeyLabel, apiKeyField, NSView()]
         ])
-        grid.rowSpacing = 12
-        grid.columnSpacing = 10
-        grid.column(at: 0).xPlacement = .trailing
-        grid.translatesAutoresizingMaskIntoConstraints = false
+        apiKeyField.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
+        modelsFolderField.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+        return transcriptionGrid
+    }
 
-        contentView.addSubview(grid)
-        NSLayoutConstraint.activate([
-            grid.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            grid.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
-            grid.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
-            grid.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -20),
-            apiKeyField.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
-            modelsFolderField.widthAnchor.constraint(greaterThanOrEqualToConstant: 220)
+    private func buildAudioPane() -> NSView {
+        let inputDeviceLabel = NSTextField(labelWithString: "Input device:")
+        let startSoundLabel = NSTextField(labelWithString: "Start sound:")
+        let stopSoundLabel = NSTextField(labelWithString: "Stop sound:")
+        return gridView(from: [
+            [inputDeviceLabel, inputDevicePopup, NSView()],
+            [startSoundLabel, startSoundPopup, NSView()],
+            [stopSoundLabel, stopSoundPopup, NSView()]
         ])
+    }
+
+    private func buildOutputPane() -> NSView {
+        let injectionLabel = NSTextField(labelWithString: "Text insertion:")
+        let injectionStack = NSStackView(views: [injectionPasteRadio, injectionTypedRadio])
+        injectionStack.orientation = .horizontal
+        injectionStack.spacing = 16
+        return gridView(from: [
+            [injectionLabel, injectionStack, NSView()]
+        ])
+    }
+
+    private func buildInterfacePane() -> NSView {
+        let appearanceLabel = NSTextField(labelWithString: "Appearance:")
+        return gridView(from: [
+            [appearanceLabel, coloredIconCheckbox, NSView()]
+        ])
+    }
+
+    private func buildAdvancedPane() -> NSView {
+        let logEverythingLabel = NSTextField(labelWithString: "Logging:")
+        return gridView(from: [
+            [logEverythingLabel, logEverythingCheckbox, NSView()]
+        ])
+    }
+
+    // MARK: - NSTableViewDataSource / Delegate (sidebar)
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        return categoryTitles.count
+    }
+
+    func tableView(_ tableView: NSTableView,
+                   viewFor tableColumn: NSTableColumn?,
+                   row: Int) -> NSView? {
+        let identifier = NSUserInterfaceItemIdentifier("Category")
+        let cell: NSTableCellView
+        if let reused = tableView.makeView(withIdentifier: identifier, owner: self)
+            as? NSTableCellView {
+            cell = reused
+        } else {
+            cell = NSTableCellView()
+            cell.identifier = identifier
+            let label = NSTextField(labelWithString: "")
+            label.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 10),
+                label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10),
+                label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            ])
+            cell.textField = label
+        }
+        cell.textField?.stringValue = categoryTitles[row]
+        return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        showCategory(at: sidebarTable.selectedRow)
     }
 
     // MARK: - Refresh from Preferences
@@ -185,7 +333,10 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         refreshInputDevicePopup()
         refreshSoundPopups()
         apiKeyField.stringValue = Preferences.shared.openAIAPIKey
-        modelsFolderField.stringValue = Preferences.shared.modelsDirectory
+        let stored = Preferences.shared.modelsDirectory
+        modelsFolderField.stringValue = stored.isEmpty
+            ? (Bundle.main.resourcePath ?? "")
+            : stored
         launchCheckbox.state = LaunchAtLogin.isEnabled ? .on : .off
         logEverythingCheckbox.state = Preferences.shared.logEverything ? .on : .off
         coloredIconCheckbox.state = Preferences.shared.useColoredMenuBarIcon ? .on : .off
@@ -223,10 +374,11 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
     }
 
     private func updateConditionalRows() {
+        guard let grid = transcriptionGrid else { return }
         let isOpenAI = Preferences.shared.backend == .openAI
-        grid.row(at: modelRowIndex).isHidden = isOpenAI
-        grid.row(at: modelsFolderRowIndex).isHidden = isOpenAI
-        grid.row(at: apiKeyRowIndex).isHidden = !isOpenAI
+        grid.row(at: transcriptionModelRowIndex).isHidden = isOpenAI
+        grid.row(at: transcriptionModelsFolderRowIndex).isHidden = isOpenAI
+        grid.row(at: transcriptionApiKeyRowIndex).isHidden = !isOpenAI
     }
 
     private func refreshBackendPopup() {
@@ -326,10 +478,12 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
 
     @objc private func injectionPasteSelected() {
         Preferences.shared.injectionMethod = .paste
+        refreshInjectionPopup()
     }
 
     @objc private func injectionTypedSelected() {
         Preferences.shared.injectionMethod = .typed
+        refreshInjectionPopup()
     }
 
     @objc private func inputDeviceChanged() {
@@ -355,6 +509,89 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         onColoredIconChanged?()
     }
 
+    @objc private func exportPreferences() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "push-to-dictate-preferences.plist"
+        panel.allowedFileTypes = ["plist"]
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            self.writeBackup(to: url)
+        }
+    }
+
+    @objc private func importPreferences() {
+        let panel = NSOpenPanel()
+        panel.allowedFileTypes = ["plist"]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            self.readBackup(from: url)
+        }
+    }
+
+    private func writeBackup(to url: URL) {
+        var userDefaults: [String: Any] = [:]
+        for key in Preferences.allUserDefaultsKeys {
+            if let value = UserDefaults.standard.object(forKey: key) {
+                userDefaults[key] = value
+            }
+        }
+        let payload: [String: Any] = [
+            "version": 1,
+            "userDefaults": userDefaults,
+            "openAIAPIKey": Preferences.shared.openAIAPIKey,
+            "launchAtLogin": LaunchAtLogin.isEnabled
+        ]
+        do {
+            let data = try PropertyListSerialization.data(fromPropertyList: payload,
+                                                          format: .xml, options: 0)
+            try data.write(to: url, options: [.atomic])
+        } catch {
+            presentBackupError("Could not write backup", detail: error.localizedDescription)
+        }
+    }
+
+    private func readBackup(from url: URL) {
+        do {
+            let data = try Data(contentsOf: url)
+            let obj = try PropertyListSerialization.propertyList(from: data,
+                                                                 options: [], format: nil)
+            guard let payload = obj as? [String: Any] else {
+                presentBackupError("Invalid backup", detail: "File is not a push-to-dictate backup.")
+                return
+            }
+            if let dict = payload["userDefaults"] as? [String: Any] {
+                for key in Preferences.allUserDefaultsKeys {
+                    if let value = dict[key] {
+                        UserDefaults.standard.set(value, forKey: key)
+                    } else {
+                        UserDefaults.standard.removeObject(forKey: key)
+                    }
+                }
+            }
+            if let apiKey = payload["openAIAPIKey"] as? String {
+                Preferences.shared.openAIAPIKey = apiKey
+            }
+            if let launch = payload["launchAtLogin"] as? Bool {
+                LaunchAtLogin.setEnabled(launch)
+            }
+            refreshAll()
+            onHotkeyChanged?()
+            onColoredIconChanged?()
+        } catch {
+            presentBackupError("Could not read backup", detail: error.localizedDescription)
+        }
+    }
+
+    private func presentBackupError(_ title: String, detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.runModal()
+    }
+
     @objc private func startSoundChanged() {
         guard let title = startSoundPopup.selectedItem?.title else { return }
         Preferences.shared.startSound = title
@@ -378,7 +615,14 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         if (obj.object as? NSTextField) === apiKeyField {
             Preferences.shared.openAIAPIKey = apiKeyField.stringValue
         } else if (obj.object as? NSTextField) === modelsFolderField {
-            Preferences.shared.modelsDirectory = modelsFolderField.stringValue
+            let text = modelsFolderField.stringValue
+            // Treat text matching the bundle's own Resources path as "no override"
+            // so moving the app later doesn't leave a stale absolute path baked in.
+            if text == (Bundle.main.resourcePath ?? "<impossible>") {
+                Preferences.shared.modelsDirectory = ""
+            } else {
+                Preferences.shared.modelsDirectory = text
+            }
             refreshModelPopup()
         }
     }
@@ -402,7 +646,7 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
     }
 
     @objc private func clearModelsFolder() {
-        modelsFolderField.stringValue = ""
+        modelsFolderField.stringValue = Bundle.main.resourcePath ?? ""
         Preferences.shared.modelsDirectory = ""
         refreshModelPopup()
     }

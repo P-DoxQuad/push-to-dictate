@@ -18,73 +18,113 @@ Plan of record for building `push-to-dictate`. Phases describe *what* gets built
 
 ## Phase 1 — Menu bar presence
 
-- `NSStatusItem` with two icon states: idle and recording
-- Menu items: *Start/Stop Dictation*, *Mode ▸ Toggle · Push-to-talk*, *Preferences…*, *Quit*
-- No transcription logic — UI shell only
+- `NSStatusItem` rendering a 24×24 `NSImage` (replaced an earlier unicode-glyph placeholder).
+- Three bundled icon variants at 44 × 44: black, white, colored.
+- Auto-mode selection: colored if `Preferences.useColoredMenuBarIcon` is on, otherwise black/white based on menu-bar appearance. Dark menu bar detected via `NSApp.effectiveAppearance` on 10.14+ and `AppleInterfaceStyle` in global `UserDefaults` on 10.13.
+- Live update: KVO on `effectiveAppearance` + `AppleInterfaceThemeChangedNotification` distributed observer.
+- Four state indicators: `.idle` (plain icon), `.recording` (green dot blinking in corner every 0.5 s), `.processing` (sky-blue dot blinking), `.error` (whole icon tinted red; auto-clears after 5 s or on notification click).
+- Menu items: *Start/Stop Dictation*, *Mode ▸ Toggle · Push-to-talk*, *Preferences…*, *Quit*.
 
 ## Phase 2 — Global hotkey
 
-- Implementation: `CGEventTap` (handles both modes with one code path)
+- `CGEventTap` on `.cgSessionEventTap`, matched events consumed so the combo doesn't leak into focused apps.
 - **Toggle mode** (default): tap hotkey → start recording. Tap again → stop, transcribe, inject.
 - **Push-to-talk mode**: keyDown starts, keyUp stops and transcribes.
-- Default binding: `⌃⌥Space` (reconfigurable in Phase 7)
-- Detect Accessibility permission on launch; if missing, prompt once and deep-link to System Preferences → Security & Privacy → Privacy → Accessibility
+- Default binding: `⌃⌥Space`. Reconfigurable via Preferences → General → Hotkey.
+- Hotkey picker rule: standalone keys are rejected unless they're F1–F20 (keycodes 96–122 + 64/79/80/90/105/106/107/113). Everything else requires at least one of ⌃ ⌥ ⇧ ⌘.
+- Accessibility permission checked on launch; if missing, an `NSAlert` explains and deep-links to System Preferences → Security & Privacy → Privacy → Accessibility.
+- Hotkey recorder also observes `.systemDefined` events and logs subtype/data for diagnostic purposes (Pause/Break and similar keys that macOS routes through the HID system-event channel).
 
 ## Phase 3 — Audio capture
 
-- `AVAudioEngine` tap on `inputNode`
-- Convert incoming format to **16 kHz mono Float32 PCM** (whisper's native format — avoids a resample before inference)
-- Buffer in memory as `[Float]`; dictation chunks are short enough that no disk spill is needed
-- Expose an RMS level so the menu-bar icon can pulse during recording
+- `AVAudioEngine` tap on `inputNode` with `AVAudioConverter` producing **16 kHz mono Float32 PCM** (whisper's native format — avoids a resample before inference).
+- Buffer in memory as `[Float]`; dictation chunks are short enough that no disk spill is needed. Buffer mutation serialized on a private `DispatchQueue` since the tap callback runs on an audio thread.
+- Per-chunk RMS computed from the raw input buffer. Surfaced via `onLevel` and used to:
+  - Drive the icon pulse (Phase 8).
+  - Track peak RMS across the recording; `StatusItemController` skips transcription when peak stays below `0.01` (silent-recording detection — no injection, no notification, icon returns straight to `.idle`).
+- Input device selection via CoreAudio (`AudioObjectGetPropertyData` enumeration; `kAudioOutputUnitProperty_CurrentDevice` on the input node's AudioUnit). Stored as `Preferences.inputDeviceUID` (empty = system default).
+- Debug WAV writer: every stop dumps the captured samples to `~/Library/Application Support/push-to-dictate/debug/recording-YYYYMMDD-HHMMSS.wav` (16-bit PCM, mono, 16 kHz) for post-hoc comparison against transcripts.
 
 ## Phase 4 — Transcriber abstraction
 
 ```swift
 protocol Transcriber {
     func transcribe(audio: [Float],
-                    completion: @escaping (Result<String, Error>) -> Void)
+                    completion: @escaping (TranscriberResult) -> Void)
 }
 ```
 
-Two implementations:
+(Swift 4.2 predates `Result<Success, Failure>` in the standard library; a local `TranscriberResult` enum replaces it.)
 
-- `WhisperCppTranscriber` — shells out to a bundled `whisper-cli` with `-oj` (JSON output) and parses the result. Simple first pass; can be swapped for direct `libwhisper` linkage later without changing callers.
-- `OpenAITranscriber` — `URLSession` multipart POST to `/v1/audio/transcriptions`, model `whisper-1`.
+Two implementations, both run on a background queue:
+
+- `WhisperCppTranscriber` — writes samples to a temp 16-bit WAV, invokes `whisper-cli -m <model> -f <wav> -l en -t 4 -nt` via `Foundation.Process`. Reads stdout, trims, returns. stderr suppressed. Pre-checks binary executability and model file existence before spawning.
+- `OpenAITranscriber` — multipart POST to `https://api.openai.com/v1/audio/transcriptions` with `model=whisper-1`, `language=en`, `response_format=text`. Per-request UUID boundary. 60 s request / 120 s resource timeouts.
+
+Both temp WAVs use the same path (`AVAudioFile` with linear-PCM settings) — logic duplicated between the two files intentionally to avoid introducing a shared helper module for a one-off concern.
+
+`makeTranscriber()` in `StatusItemController` reads `Preferences.backend` on every transcription call, so backend switches from the Preferences window take effect on the next recording without needing to recreate anything.
 
 ## Phase 5 — whisper.cpp integration (build side)
 
-- Clone whisper.cpp, build `whisper-cli` for x86_64 on High Sierra
-- Binary location: `~/Library/Application Support/push-to-dictate/bin/whisper-cli` (sidecar, not bundled in the app)
-- Model storage: `~/Library/Application Support/push-to-dictate/models/`
-- First-run offer: auto-download `small.en` (~465 MB)
-- Later milestone: replace the CLI shell-out with Swift↔C bridging-header calls into `libwhisper` (`whisper_init_from_file`, `whisper_full`, `whisper_full_get_segment_text`) for lower latency
+- **Pinned to v1.7.2.** Upstream commits from 2024-12-08 onward include `#include <filesystem>` in `ggml/src/ggml-backend-reg.cpp`; Xcode 10.1's libc++ has no `<filesystem>` header. v1.7.2 is the last tag that still builds on High Sierra.
+- **No-AVX build flags.** Mac Pro 5,1 Westmere Xeons (X5650 class) lack AVX / AVX2 / FMA / F16C. CMake flags: `-DGGML_METAL=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release`. Accelerate framework auto-detected for BLAS.
+- `scripts/setup.sh` (idempotent): clones whisper.cpp at the pinned commit into `vendor/whisper.cpp/`, builds with the above flags via MacPorts `cmake` (or system `cmake`), renames the built `main` binary to `whisper-cli` (v1.7.2 predates the upstream rename), downloads `ggml-small.en.bin` from Hugging Face, verifies SHA256.
+- `vendor/` is `.gitignore`'d; the script re-populates it. Setup is the preservation story: no reliance on Hugging Face or upstream whisper.cpp remaining up forever (user will later fork the repo and host the model on their own GitHub Release; two lines in `setup.sh` flip over).
+- **Bundled in the `.app`** via an Xcode Copy Files build phase that drops `vendor/whisper.cpp/build/bin/whisper-cli` and `vendor/models/ggml-small.en.bin` into `Contents/Resources/` on every build. End users get a self-contained offline app; dev builds also run against the bundled copy.
+- Runtime path resolution (both `whisperCliPath` and `whisperModelPath`): **user override → bundle Resources**. No Application Support fallback. Models and the binary are dependencies, not user data, so they live in the bundle only.
+- Optional `Preferences.modelsDirectory` lets a power user point at an external folder — e.g. models on a secondary drive. Empty = use bundle.
+- **Performance baseline on the X5650 without AVX**: roughly 15× slower than realtime for the `small.en` model. Example: 1.4 s of audio → 21.3 s processing. Usable for short dictation; slow for anything longer. Deferred tuning: quantized small.en-q5_0, greedy decoding (`-bs 1 -bo 1`), thread count tweaks, direct `libwhisper` linkage via a Swift↔C bridging header.
 
 ## Phase 6 — Text injection
 
-Default strategy — paste:
+`TextInjector.insert(_:)` reads `Preferences.injectionMethod` on each call and dispatches to a private serial queue so neither path blocks main.
 
-1. Snapshot current `NSPasteboard.general` contents
-2. Write transcript as plain text
-3. Post `⌘V` via `CGEventPost` (keycode 9 + `.maskCommand`)
-4. Restore the snapshot after a short delay (~200 ms)
+**Paste strategy** (default):
 
-Fallback strategy — typed: `CGEvent.keyboardSetUnicodeString` character-by-character. Slower, but preserves pasteboard and works in apps that intercept paste.
+1. Snapshot `NSPasteboard.general` contents (per-item, per-type, deep-copied into fresh `NSPasteboardItem`s).
+2. Write transcript as `.string`.
+3. Post `⌘V` via `CGEvent.post(tap: .cghidEventTap)` (virtual key 9 + `.maskCommand`).
+4. Restore the snapshot after a fixed 200 ms delay (heuristic — too short clobbers the paste, too long leaves a visible clipboard gap).
+
+**Typed strategy**: iterates `text.unicodeScalars`, posting one keyDown/keyUp pair per scalar via `CGEvent.keyboardSetUnicodeString`. No inter-character pacing — relies on the target app accepting events at full speed. Near-instant for short dictation, visibly types out multi-sentence output. Preserves pasteboard; works in apps that intercept paste (some terminals, secure fields).
+
+Choice exposed via radio buttons in Preferences → Output.
 
 ## Phase 7 — Preferences window
 
-- Hotkey picker (record a key combo)
-- Mode: Toggle / Push-to-talk
-- Backend: Local (whisper.cpp) / OpenAI API
-- Local model: `tiny.en` · `base.en` · `small.en` · `medium.en` · `large-v3`
-- OpenAI API key — migrate from `UserDefaults` (where Phase 4 first stores it) to **Keychain**
-- Injection method: paste / typed
+Programmatic AppKit, no XIB. Split-view layout: left `NSTableView` sidebar listing six categories, right content container swapping in the selected category's `NSGridView`. Window is resizable; minimum 640 × 340.
+
+Categories:
+
+- **General** — Hotkey picker (click-to-record, writes `Preferences.hotkeyKeyCode` + `hotkeyModifierFlags`; live-applies to `HotkeyMonitor` via an `onHotkeyChanged` callback). Startup checkbox (Launch at login). Backup Export…/Import… buttons.
+- **Transcription** — Backend popup (whisper.cpp / OpenAI). Local model popup (populated from bundle Resources or `modelsDirectory`). Models folder field with Choose…/Clear buttons; empty = use bundle (field pre-populated with the bundle Resources path so you can see where models live by default). OpenAI API key `NSSecureTextField`. The model/models-folder rows hide when backend is OpenAI; the API key row hides when backend is whisper.cpp.
+- **Audio** — Input device popup (System default + CoreAudio enumerated inputs). Start-sound and Stop-sound popups (scanning `/System/Library/Sounds/` and `~/Library/Sounds/`; "None" means silent; previewing on change).
+- **Output** — Text insertion radio buttons (Paste / Typed).
+- **Interface** — Colored menu bar icon checkbox. Changes trigger a live icon refresh via `onColoredIconChanged`.
+- **Advanced** — Log everything checkbox.
+
+Mode (Toggle / Push-to-talk) stays in the menu-bar menu — it's a quick-flip setting rather than a preference.
+
+Backup Export/Import writes a plist containing:
+- `userDefaults` — every key listed in `Preferences.allUserDefaultsKeys`.
+- `openAIAPIKey` — pulled from Keychain, written back to Keychain on import.
+- `launchAtLogin` — reflects whether the LaunchAgents plist exists; re-created on import.
+- `version` — format version marker.
+
+API key stays in the Keychain (`kSecClassGenericPassword`, service `push-to-dictate`, account `openai-api-key`). Transparent one-shot migration on first read: if Keychain is empty but a legacy `UserDefaults` value exists (from Phase 4 before Keychain landed), it's copied over and removed from UserDefaults. Keychain helpers are private statics on `Preferences` — no new source file.
 
 ## Phase 8 — Polish
 
-- Animated/colored recording indicator in the menu bar
-- Optional start/stop sounds
-- Error surfaces: no mic, API key missing, model not found, network failure
-- Launch-at-login option
+- **App icon** — `.icns` generated from a 1024 × 1024 colored source via `sips` + `iconutil`; bundled via Xcode Copy Files; `CFBundleIconFile` wired in `Info.plist`.
+- **Menu-bar icon states** — see Phase 1.
+- **Sounds** — `Preferences.startSound` / `stopSound`, system-sound picker with "None" to disable.
+- **Launch at login** — checkbox installs/removes `~/Library/LaunchAgents/com.paradoxicalquad.push-to-dictate.plist` (`Label`, `ProgramArguments = [Bundle.main.executablePath]`, `RunAtLoad = true`). Not using `SMLoginItemSetEnabled` because that requires a signed helper, which Sign-to-Run-Locally builds can't provide.
+- **Error surfaces** — `showError(title:detail:)` logs via `Logger.error`, posts an `NSUserNotification`, sets icon state to `.error`. Pre-flight checks in `StatusItemController.setRecording(true)` catch missing whisper-cli, missing model, and missing OpenAI API key before audio capture starts. Runtime failures (mic start, transcription) also route through `showError`. `NSUserNotificationCenterDelegate` forces banners even when the app is frontmost and clears the error tint early if the user clicks the banner.
+- **Silent recording detection** — see Phase 3.
+- **Logger** (`Core/Logger.swift`) — two levels, both always `NSLog`'d; `.error` always written to file, `.info` written to file only when `Preferences.logEverything` is on. File at `~/Library/Application Support/push-to-dictate/logs/push-to-dictate.log`, one-line append per event, writes serialized on a dedicated queue.
+- **Move-to-Applications prompt** — first launch from outside `/Applications/`, `~/Applications/`, or an Xcode DerivedData path shows an `NSAlert` offering to move. "Don't Ask Again" persists via `Preferences.suppressedMoveToApplicationsPrompt`. On "Move", `FileManager` moves the bundle and a detached `/bin/sh` relaunch script `open`s the new copy after a 1 s sleep.
+- **About / Credits dialog** — deferred.
 
 ---
 
@@ -100,14 +140,6 @@ Each step is a working, demo-able increment.
 6. **Phase 6** — inject the transcript into the focused field.
 7. **Phase 7** — preferences UI to switch backends, pick models, set API key, change hotkey.
 8. **Phase 8** — polish.
-
----
-
-## Open questions
-
-1. Default hotkey — `⌃⌥Space` acceptable, or preferred alternative?
-2. First-run model acquisition — auto-download `small.en`, or require the user to place a model file manually?
-3. OpenAI API key — available for testing, or deferred?
 
 ---
 
@@ -434,3 +466,14 @@ End users hit (2). Developers running out of Xcode without the Copy Files phase 
 - "Move to /Applications" prompt on first launch from a quarantined location.
 - Per-app override for injection method (paste vs typed) to work around autocomplete-heavy apps.
 - Transcription speed tuning (quantized model, greedy decoding, thread count tweaks, direct `libwhisper` linkage).
+
+### 2026-11-13 — Phase 8 polish, second pass
+
+- **Silent-recording detection** landed. `AudioRecorder` tracks peak RMS across the capture; `StatusItemController.setRecording(false)` short-circuits transcription when peak < 0.01. Icon returns straight to `.idle`; no notification, no injection, no `[blank_audio]` placeholder leaking into the focused field. Threshold is hardcoded for now; if real speech gets filtered we'd expose it as a preference.
+- **Move-to-Applications prompt** landed. `AppDelegate.applicationDidFinishLaunching` checks `Bundle.main.bundleURL`, skips if under `/Applications/`, `~/Applications/`, or a DerivedData / Developer-Xcode path. Three-button `NSAlert` — Move, Not Now, Don't Ask Again. Move uses `FileManager.moveItem` + a detached `/bin/sh` relaunch script. Dev builds are exempt so Xcode run cycles aren't interrupted.
+- **Backup Export / Import** landed in Preferences. Plist format with `version`, `userDefaults`, `openAIAPIKey` (pulled from Keychain, written back on import), `launchAtLogin` (reflecting LaunchAgents plist presence). `Preferences.allUserDefaultsKeys` exposes the canonical key list for round-trips.
+- **Radio-button toggle bug fix.** Paste / Typed radios share an `NSStackView` but have distinct actions, so AppKit's auto-grouping didn't kick in — both could appear selected. Each action now calls `refreshInjectionPopup()` to sync both button states from `Preferences.injectionMethod`.
+- **Models folder field display rework.** Field is now always populated: user's `modelsDirectory` if set, else `Bundle.main.resourcePath`. Scrolls natively when the path is long. `controlTextDidChange` treats "text equals bundle resources path" as "no override" (saves `""` to Preferences) so moving the app later doesn't leave a stale absolute path baked in. Clear button resets the field to the bundle path.
+- **Preferences window split-view refactor.** Replaced the 13-row single-grid dump with a split view: left `NSTableView` sidebar (source-list style) listing six categories, right content container swapping in the selected category's `NSGridView`. Window is resizable (minimum 640 × 340), sidebar fixed at 170 pt. Conditional row visibility (local model + models folder hidden for OpenAI backend; API key hidden for whisper.cpp backend) scoped to the Transcription grid.
+- **Category grouping iteration.** Initial split: General/Transcription/Audio/Output/Interface/Advanced. Backend moved from General to Transcription (sits with the model/API-key rows it affects). Backup Export/Import moved from Advanced to General (user-facing operation, not an advanced one). Advanced now contains just Logging.
+- **Preference label cleanup carried over** from the first polish pass: `(otherwise …)` → `(unchecked, …)` on log-everything and colored-icon checkboxes.
