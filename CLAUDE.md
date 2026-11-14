@@ -30,6 +30,7 @@ Applies to all project docs (CLAUDE.md, README.md, DEVLOG.md, THIRD_PARTY_NOTICE
 - Comments minimum. Only on non-trivial code, non-obvious arguments, non-obvious member semantics. Never narrate what the code does.
 - Do not remove existing comments unrelated to the change.
 - No emoji in code.
+- Do not create shim functions, wrapper helpers, extension methods, or compatibility layers unless strictly necessary. Necessary means: an API is unavailable on the deployment target and needs a drop-in replacement, OR the same inline setup is being duplicated in three or more places with real risk of divergence. Everything else is inlined. "I thought it would be cleaner" is not a reason. Wrappers that encapsulate three lines of property assignment are noise. If one exists and it's not necessary, inline it when touching surrounding code.
 
 ## Workflow
 
@@ -54,6 +55,7 @@ Applies to all project docs (CLAUDE.md, README.md, DEVLOG.md, THIRD_PARTY_NOTICE
 - State decisions directly. Do not narrate deliberation.
 - Omit unrequested caveats, warnings, and negatives.
 - Ask when hardware or environment matters. Do not guess.
+- No human-developer time estimates ("an hour", "half a day", "a week"). Those numbers are calibrated to a human typing, not actual throughput. If an estimate is genuinely needed, give it in realistic terms (small / medium / large change) or in concrete units (number of files touched, lines changed). Prefer no estimate at all.
 
 ## Environment
 

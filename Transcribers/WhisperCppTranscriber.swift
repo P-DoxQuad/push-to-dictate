@@ -86,7 +86,7 @@ final class WhisperCppTranscriber: Transcriber {
         let prefs = Preferences.shared
         let beam = String(prefs.beamSize)
         let process = Process()
-        process.executableURL = executableURL
+        process.launchPath = executableURL.path
         process.arguments = [
             "-m", modelURL.path,
             "-f", wavURL.path,
@@ -102,7 +102,7 @@ final class WhisperCppTranscriber: Transcriber {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        try process.run()
+        process.launch()
         process.waitUntilExit()
 
         let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()

@@ -10,9 +10,9 @@ Runs on CPU. No GPU, Neural Engine, or network connection is used by the local b
 
 ## Supported platforms
 
-- macOS 10.13 High Sierra and newer.
-- Intel x86_64 CPUs. Builds for Mac Pro 5,1-class hardware without AVX / AVX2 / FMA / F16C. SSE4.2 used.
-- Apple Silicon not currently targeted (deployment target precedes macOS 11).
+- macOS 10.11 El Capitan through macOS 15 Sequoia.
+- Intel x86_64 CPUs. Targets Nehalem microarchitecture and newer. Westmere (Mac Pro 5,1), Sandy Bridge, Ivy Bridge, Haswell, Broadwell, Skylake, and later all qualify. SSE4.2 required; AVX / AVX2 / FMA / F16C are not required and explicitly disabled in the whisper.cpp build.
+- Apple Silicon runs the binary under Rosetta 2. Native arm64 is not currently targeted.
 
 ## Capabilities
 
@@ -49,11 +49,12 @@ The Xcode `push-to-dictate` scheme produces `Push to Dictate.app` in its Derived
 ## Permissions
 
 - **Accessibility**: required for `CGEventTap` (global hotkey capture) and `CGEvent.post` (synthesized keystroke injection). First launch presents an alert and opens System Preferences → Security & Privacy → Privacy → Accessibility.
-- Microphone permission: not applicable. The macOS 10.13 permission model does not include a microphone prompt.
+- **Microphone**: prompted automatically on macOS 10.14 Mojave and newer, using the `NSMicrophoneUsageDescription` string from `Info.plist`. No microphone permission model exists on 10.11 through 10.13; audio capture works without a prompt.
+- **Notifications**: delivered via `UNUserNotificationCenter` on macOS 10.14 and newer (requires one-time user authorization at first launch), falling back to `NSUserNotificationCenter` on 10.11 through 10.13.
 
 ## Code signing
 
-Signed with the `Sign to Run Locally` identity. Apple Developer Program signing and notarization require a deployment target newer than 10.13.
+Signed with the `Sign to Run Locally` identity. Apple Developer Program signing and notarization require a deployment target newer than the lowest supported OS.
 
 On first launch of a bundle not built on the current machine, Gatekeeper rejects it with "cannot be opened because the developer cannot be verified". Finder right-click → Open bypasses this prompt. The acknowledgment persists per machine.
 

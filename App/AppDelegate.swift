@@ -76,7 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let task = Process()
         task.launchPath = "/bin/sh"
         task.arguments = ["-c", "sleep 1; open '\(dst.path)'"]
-        try? task.run()
+        task.launch()
 
         NSApp.terminate(nil)
     }

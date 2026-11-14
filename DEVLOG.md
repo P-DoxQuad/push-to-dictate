@@ -635,3 +635,72 @@ Two triggers:
 - **Hover** — `NSTrackingArea` installed on the status item's button with a tiny `HoverTracker: NSResponder` as owner (forwards `mouseEntered` / `mouseExited` to closures on the controller). Mouse enters → 1.5 s show timer. Exits → 0.3 s hide timer (grace period absorbs flicker when the cursor briefly leaves and comes back). No auto-dismiss on hover; mouse-exit handles it.
 
 Single popover instance reused for both paths. `showInfoPopover(autoDismissAfter:)` guards on `welcomePopover?.isShown` so overlapping triggers can't produce two popovers. `.transient` behavior so clicking anywhere outside dismisses, and clicking the icon itself opens the menu normally (menu takes focus, popover closes).
+
+### 2026-11-14 — El Capitan + Nehalem target (`nehalem-el-capitan` branch)
+
+Backwards-compat branch. Target OS floor dropped from 10.13 to 10.11 El Capitan; whisper.cpp built against Nehalem for binary portability. No functional changes to the app.
+
+#### Build config
+
+- `scripts/setup.sh`: `CMAKE_OSX_DEPLOYMENT_TARGET=10.11`, `GGML_NATIVE=OFF`, `-march=nehalem` for both C and C++. Produces a `whisper-cli` that runs unchanged on any Nehalem-or-newer CPU without AVX. Same SSE4.2 code path as the previous Westmere-native build, so no perf regression on the X5650.
+- `App/Info.plist`: `LSMinimumSystemVersion` 10.13 → 10.11. Added `NSMicrophoneUsageDescription` for the TCC prompt on 10.14+.
+- `push-to-dictate.xcodeproj/project.pbxproj`: `MACOSX_DEPLOYMENT_TARGET` 10.13 → 10.11 (both configs). Xcode embeds the Swift stdlib automatically.
+
+#### Swift-side API swaps (10.12+/10.13+ → pre-10.12)
+
+Every call that targeted a newer AppKit API was rewritten inline using the pre-10.12 equivalent. No shim layer, no helper file; the setup code sits directly in each stored-property initializer and each pane builder.
+
+- `NSTextField(labelWithString:)`, `NSTextField(wrappingLabelWithString:)` → `NSTextField(frame: .zero)` + `isEditable = false` + `isBordered = false` + `drawsBackground = false` (+ wrap properties for wrapping).
+- `NSButton(title:target:action:)`, `NSButton(checkboxWithTitle:...)`, `NSButton(radioButtonWithTitle:...)` → `NSButton(frame: .zero)` + `bezelStyle`/`setButtonType(.switch)`/`setButtonType(.radio)` + `.title`.
+- `NSGridView` → plain `NSView` panes with manual Auto Layout; vertical stacking via explicit `topAnchor = previous.bottomAnchor + gap`.
+- `NSStackView.setCustomSpacing(_:after:)` → explicit spacer `NSView`s with fixed `heightAnchor` constraints inserted as arranged subviews.
+- `Timer.scheduledTimer(withTimeInterval:repeats:block:)` → `Timer.scheduledTimer(timeInterval:target:selector:userInfo:repeats:)` with `@objc` tick methods for each (`dotTick`, `errorClearTick`, `welcomeDismissTick`, `hoverShowTick`, `hoverHideTick`).
+- `NSImage.Name(...)` → raw string literals.
+- `NSSound.Name(...)` → raw string literals.
+- `Process.executableURL` / `Process.run()` → `Process.launchPath` / `Process.launch()`.
+
+#### Notification dual-path for 10.14+
+
+`StatusItemController.showError` branches at runtime via `#available(macOS 10.14, *)`:
+
+- 10.14 and newer: `UNUserNotificationCenter` with a one-shot `requestAuthorization(options:)` at startup. `UNUserNotificationCenterDelegate` conformance lives in a separate `@available(macOS 10.14, *) extension`, since the protocol itself is 10.14+.
+- 10.11 through 10.13: `NSUserNotification` + `NSUserNotificationCenter` as before.
+
+Same behavior either way (banner on error, early-dismiss on click). No conditional compilation (`#if`); pure `#available` runtime branching.
+
+#### Preferences window rewritten from scratch
+
+The existing `PreferencesWindowController.swift` was deleted and written again. Multiple iterations of patching `NSStackView` + `NSGridView`-style layout failed to produce the user-requested alignment. The new file uses the pattern that a minimal isolation-test window had proven to work:
+
+- Each pane is a plain `NSView`.
+- For each row: one `NSTextField` label (right-aligned text) with `widthAnchor` fixed to the pane's longest-label width, one control pinned `label.trailing + 8`, controls vertically chained via `topAnchor = previousControl.bottomAnchor + 12`.
+- Per-pane dynamic label-column width via a static `widestLabelWidth(_:)` that measures each label with the system font. Means each pane's label column is sized to its own longest label and nothing wider — minimum whitespace per pane, controls still aligned in a column.
+- The Transcription pane specifically needs conditional hiding (backend-dependent). That pane only is wrapped in an outer vertical `NSStackView` with the individual row views as arranged subviews, so `row.isHidden = true` collapses both the row and its spacing (the other five panes are plain `NSView` with manual constraint chains).
+
+#### Label text trimmed
+
+Several checkbox and button titles got shortened in this pass to stop them pushing adjacent controls off to the right:
+
+- "Save debug recordings (unchecked, discard after transcription)" → "Save debug recordings"
+- "Log everything (unchecked, errors only)" → "Log everything"
+- "Clear Debug Recordings…" → "Clear Recordings…"
+- Accuracy hint: "1 = greedy (fastest) · 5 = default · 10 = thorough (slowest)" → "1 = fastest · 5 = default · 10 = slowest"
+
+#### CLAUDE.md additions
+
+Two new persistent rules, since both patterns caused rework on this branch:
+
+- No shim/wrapper helpers unless strictly necessary (API unavailable on target, or ≥3 duplicated call sites with real divergence risk). Inline setup otherwise.
+- No em-dashes anywhere (UI strings, docs, commit messages, chat). Use colon, period, or regular hyphen.
+- No human-developer time estimates ("an hour", "half a day", "a week") in any output. Time-to-type numbers calibrated for a human aren't useful. If sizing is needed: qualitative (small/medium/large) or concrete counts (files touched, lines changed).
+
+#### README
+
+Supported-platforms section updated: macOS 10.11 El Capitan through macOS 15 Sequoia. Intel x86_64 targeting Nehalem and newer. Microphone permission described as "prompted on 10.14+ via `NSMicrophoneUsageDescription`, not applicable on 10.11–10.13". Notifications documented as dual-path (`UNUserNotificationCenter` on 10.14+, `NSUserNotificationCenter` on 10.11–10.13).
+
+#### Pending user action
+
+- Delete the `LayoutTestWindow.swift` reference from the Xcode project (the file was removed on-disk mid-session after the isolation test was complete).
+- Add `Core/NSTextField+Compat.swift` was created then deleted later in the session as the inline approach replaced it — reference should be removed from the project if still present.
+
+If the El Capitan target holds up on test hardware, merge back to `main` as `1.1.0`.

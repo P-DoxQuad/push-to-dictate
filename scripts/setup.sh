@@ -23,17 +23,27 @@ MODEL_URL="${MODEL_URL:-https://huggingface.co/ggerganov/whisper.cpp/resolve/mai
 MODEL_FILENAME="ggml-small.en.bin"
 MODEL_SHA256="c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"
 
-# CMake flags required for Mac Pro 5,1 class Xeons (Westmere / Nehalem):
-# AVX / AVX2 / FMA / F16C are not supported — default whisper.cpp builds will
-# die with "illegal instruction" at launch without disabling them.
+# CMake flags for Mac Pro 5,1 class Xeons (Westmere) and earlier Nehalem CPUs.
+# AVX / AVX2 / FMA / F16C are not supported; default whisper.cpp builds die
+# with "illegal instruction" at launch without disabling them.
+#
+# Targeting Nehalem explicitly (instead of GGML_NATIVE=ON) emits code that
+# runs unchanged on Westmere (Nehalem + AES-NI + PCLMULQDQ, neither of which
+# whisper uses) while also running on first-generation Nehalem CPUs.
+#
+# CMAKE_OSX_DEPLOYMENT_TARGET=10.11 ensures the binary links against symbols
+# available on El Capitan and newer.
 CMAKE_FLAGS=(
     -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=10.11
+    -DCMAKE_C_FLAGS=-march=nehalem
+    -DCMAKE_CXX_FLAGS=-march=nehalem
     -DGGML_METAL=OFF
     -DGGML_AVX=OFF
     -DGGML_AVX2=OFF
     -DGGML_FMA=OFF
     -DGGML_F16C=OFF
-    -DGGML_NATIVE=ON
+    -DGGML_NATIVE=OFF
 )
 
 # --- Locate repo root -------------------------------------------------------
