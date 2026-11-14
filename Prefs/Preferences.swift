@@ -28,6 +28,8 @@ final class Preferences {
         static let logEverything = "logEverything"
         static let useColoredMenuBarIcon = "useColoredMenuBarIcon"
         static let suppressedMoveToApplicationsPrompt = "suppressedMoveToApplicationsPrompt"
+        static let transcriptionThreads = "transcriptionThreads"
+        static let greedyDecoding = "greedyDecoding"
     }
 
     static let noSoundName = "None"
@@ -110,6 +112,22 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.suppressedMoveToApplicationsPrompt) }
     }
 
+    var transcriptionThreads: Int {
+        get {
+            let stored = defaults.integer(forKey: Key.transcriptionThreads)
+            return stored == 0 ? 6 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.transcriptionThreads) }
+    }
+
+    var greedyDecoding: Bool {
+        get {
+            if defaults.object(forKey: Key.greedyDecoding) == nil { return true }
+            return defaults.bool(forKey: Key.greedyDecoding)
+        }
+        set { defaults.set(newValue, forKey: Key.greedyDecoding) }
+    }
+
     var whisperModelPath: String {
         let filename = localModelFilename
         if !modelsDirectory.isEmpty {
@@ -190,7 +208,8 @@ final class Preferences {
         Key.whisperCliPath, Key.openAILanguage, Key.inputDeviceUID,
         Key.startSound, Key.stopSound, Key.modelsDirectory,
         Key.logEverything, Key.useColoredMenuBarIcon,
-        Key.suppressedMoveToApplicationsPrompt
+        Key.suppressedMoveToApplicationsPrompt,
+        Key.transcriptionThreads, Key.greedyDecoding
     ]
 
     // MARK: - Keychain

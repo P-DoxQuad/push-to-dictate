@@ -5,7 +5,6 @@ final class WhisperCppTranscriber: Transcriber {
     var executableURL: URL
     var modelURL: URL
     var language: String = "en"
-    var threads: Int = 4
 
     init(executableURL: URL, modelURL: URL) {
         self.executableURL = executableURL
@@ -84,15 +83,20 @@ final class WhisperCppTranscriber: Transcriber {
                             "model not found at \(modelURL.path)"])
         }
 
+        let prefs = Preferences.shared
         let process = Process()
         process.executableURL = executableURL
-        process.arguments = [
+        var args = [
             "-m", modelURL.path,
             "-f", wavURL.path,
             "-l", language,
-            "-t", String(threads),
+            "-t", String(prefs.transcriptionThreads),
             "-nt"
         ]
+        if prefs.greedyDecoding {
+            args.append(contentsOf: ["-bs", "1", "-bo", "1"])
+        }
+        process.arguments = args
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()

@@ -124,6 +124,7 @@ API key stays in the Keychain (`kSecClassGenericPassword`, service `push-to-dict
 - **Silent recording detection** — see Phase 3.
 - **Logger** (`Core/Logger.swift`) — two levels, both always `NSLog`'d; `.error` always written to file, `.info` written to file only when `Preferences.logEverything` is on. File at `~/Library/Application Support/push-to-dictate/logs/push-to-dictate.log`, one-line append per event, writes serialized on a dedicated queue.
 - **Move-to-Applications prompt** — first launch from outside `/Applications/`, `~/Applications/`, or an Xcode DerivedData path shows an `NSAlert` offering to move. "Don't Ask Again" persists via `Preferences.suppressedMoveToApplicationsPrompt`. On "Move", `FileManager` moves the bundle and a detached `/bin/sh` relaunch script `open`s the new copy after a 1 s sleep.
+- **Transcription speed tuning** — `Preferences.transcriptionThreads` (default 6, range 1–24) and `Preferences.greedyDecoding` (default on). Threads surfaced as a stepper + field under Preferences → Advanced; greedy as a checkbox. Greedy appends `-bs 1 -bo 1` to the `whisper-cli` invocation, skipping beam search and best-of reranking. Both are read at transcribe time so changes take effect on the next dictation. `PreferencesWindowController` conforms to `NSMenuDelegate` and rescans the models folder in `menuNeedsUpdate(_:)` so newly dropped model files appear on the next click without reopening the window.
 - **About / Credits dialog** — deferred.
 
 ---
@@ -477,3 +478,44 @@ End users hit (2). Developers running out of Xcode without the Copy Files phase 
 - **Preferences window split-view refactor.** Replaced the 13-row single-grid dump with a split view: left `NSTableView` sidebar (source-list style) listing six categories, right content container swapping in the selected category's `NSGridView`. Window is resizable (minimum 640 × 340), sidebar fixed at 170 pt. Conditional row visibility (local model + models folder hidden for OpenAI backend; API key hidden for whisper.cpp backend) scoped to the Transcription grid.
 - **Category grouping iteration.** Initial split: General/Transcription/Audio/Output/Interface/Advanced. Backend moved from General to Transcription (sits with the model/API-key rows it affects). Backup Export/Import moved from Advanced to General (user-facing operation, not an advanced one). Advanced now contains just Logging.
 - **Preference label cleanup carried over** from the first polish pass: `(otherwise …)` → `(unchecked, …)` on log-everything and colored-icon checkboxes.
+
+### 2026-11-13 — Transcription speed tuning
+
+Chasing the "it's too slow" problem on the X5650 through three independent levers: quantization, thread count, and decoding strategy.
+
+#### Quantization benchmark
+
+Three variants of `small.en` on two clips (`whisper.cpp/samples/jfk.wav` and a ~43 s real debug recording), same flags, `-t 4`:
+
+| Model | Size | JFK (11 s) | Real (43 s) |
+|---|---|---|---|
+| `small.en` (f16) | 465 MB | 28.1 s | 60.7 s |
+| `small.en-q8_0` | 252 MB | 19.6 s (–30%) | 40.7 s (–33%) |
+| `small.en-q5_1` | 181 MB | 21.4 s (–24%) | 45.9 s (–24%) |
+
+Transcripts were byte-identical across all three — quantization did not cost measurable accuracy on these samples. q8_0 beat q5_1 on this CPU: q5_1's packed 5-bit format doesn't vectorize as well under SSE4.2-only as q8_0's cleaner byte-aligned blocks. Encode time was essentially constant (~14.7 s) across models — it's bound by audio length and encoder architecture, not weight precision. All speed gains came from the decode / batched-decode phase, where quantized weights reduce memory traffic per matmul step.
+
+Also downloaded `tiny.en`, `base.en`, plus q8_0 and q5_1 for both, giving the full matrix in `vendor/models/` (9 files). User testing then landed on accuracy bands roughly: `small.en` ~95–98%, `base.en` ~90%, `tiny.en` ~75–80%; q8_0 of each sits at the same accuracy as its parent.
+
+#### Thread count
+
+Hardcoded default moved 4 → 6. On the X5650 (dual Xeon, 12 physical / 24 logical) this was a perceptibly big felt-speed improvement — bigger than quantization. Then exposed as `Preferences.transcriptionThreads` (stepper + text field, 1–24) under **Advanced**. Dual-socket NUMA is unmodeled by whisper.cpp, so cross-socket threads hit remote memory over QPI; gains from going past physical-core-of-one-socket are likely to be small or negative, but the preference lets the user explore.
+
+#### Greedy decoding
+
+`-bs 1 -bo 1` appended to the `whisper-cli` invocation — beam size 1, best-of 1, skipping beam search and candidate reranking. Exposed as `Preferences.greedyDecoding` (checkbox under **Advanced**, default **on**). Small accuracy hit on ambiguous audio; imperceptible on clear dictation.
+
+Both prefs are read at transcribe time in `WhisperCppTranscriber.transcribe`, so toggling them takes effect on the next dictation without restart.
+
+#### Model picker live rescan
+
+`PreferencesWindowController` now conforms to `NSMenuDelegate` and refreshes the model popup in `menuNeedsUpdate(_:)`. Dropping new `ggml-*.bin` files into the models folder makes them appear on the next click, no window reopen.
+
+#### Deferred (still Phase 8 scope)
+
+- **Direct `libwhisper` linkage** via a Swift ↔ C bridging header. Would skip the subprocess spawn but, more importantly, would let us keep the model resident between dictations — current shell-out eats ~500 ms of load time per invocation. Biggest remaining non-architectural win.
+- **Streaming / chunked transcription** — start transcribing in ~5 s windows while the user is still speaking. Perceived latency drops to near-zero. Needs VAD or fixed-window chunking and partial-update UX.
+- **Auto-detect thread default** via `sysctl hw.physicalcpu` at first launch instead of the current hardcoded 6.
+- **Bundling model variants** — currently only `ggml-small.en.bin` is in the Copy Files build phase. Need to decide whether to ship the full matrix (adds ~1.6 GB to the `.app`) or a curated subset (e.g. `base.en-q8_0` as the default plus `tiny.en-q8_0` and `small.en-q8_0` as alternates).
+- **Per-app override for injection method** (paste vs typed).
+- **About / Credits dialog.**

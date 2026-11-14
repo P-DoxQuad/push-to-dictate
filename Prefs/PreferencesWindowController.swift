@@ -4,7 +4,8 @@ import CoreGraphics
 final class PreferencesWindowController: NSWindowController,
                                          NSTextFieldDelegate,
                                          NSTableViewDataSource,
-                                         NSTableViewDelegate {
+                                         NSTableViewDelegate,
+                                         NSMenuDelegate {
     static let shared = PreferencesWindowController()
 
     var onHotkeyChanged: (() -> Void)?
@@ -38,6 +39,11 @@ final class PreferencesWindowController: NSWindowController,
         target: nil, action: nil)
     private let exportButton = NSButton(title: "Export…", target: nil, action: nil)
     private let importButton = NSButton(title: "Import…", target: nil, action: nil)
+    private let threadsField = NSTextField()
+    private let threadsStepper = NSStepper()
+    private let greedyCheckbox = NSButton(
+        checkboxWithTitle: "Greedy decoding (unchecked, beam search for best accuracy)",
+        target: nil, action: nil)
 
     // State
     private var inputDevices: [(uid: String, name: String)] = []
@@ -100,6 +106,7 @@ final class PreferencesWindowController: NSWindowController,
 
         modelPopup.target = self
         modelPopup.action = #selector(modelChanged)
+        modelPopup.menu?.delegate = self
 
         injectionPasteRadio.target = self
         injectionPasteRadio.action = #selector(injectionPasteSelected)
@@ -137,6 +144,17 @@ final class PreferencesWindowController: NSWindowController,
 
         apiKeyField.placeholderString = "sk-..."
         apiKeyField.delegate = self
+
+        threadsStepper.minValue = 1
+        threadsStepper.maxValue = 24
+        threadsStepper.increment = 1
+        threadsStepper.valueWraps = false
+        threadsStepper.target = self
+        threadsStepper.action = #selector(threadsStepperChanged)
+        threadsField.delegate = self
+
+        greedyCheckbox.target = self
+        greedyCheckbox.action = #selector(greedyChanged)
     }
 
     // MARK: - Layout (split view)
@@ -282,7 +300,18 @@ final class PreferencesWindowController: NSWindowController,
 
     private func buildAdvancedPane() -> NSView {
         let logEverythingLabel = NSTextField(labelWithString: "Logging:")
+        let threadsLabel = NSTextField(labelWithString: "Transcription threads:")
+        let decodingLabel = NSTextField(labelWithString: "Decoding:")
+
+        threadsField.translatesAutoresizingMaskIntoConstraints = false
+        threadsField.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        let threadsRow = NSStackView(views: [threadsField, threadsStepper])
+        threadsRow.orientation = .horizontal
+        threadsRow.spacing = 4
+
         return gridView(from: [
+            [threadsLabel, threadsRow, NSView()],
+            [decodingLabel, greedyCheckbox, NSView()],
             [logEverythingLabel, logEverythingCheckbox, NSView()]
         ])
     }
@@ -340,6 +369,10 @@ final class PreferencesWindowController: NSWindowController,
         launchCheckbox.state = LaunchAtLogin.isEnabled ? .on : .off
         logEverythingCheckbox.state = Preferences.shared.logEverything ? .on : .off
         coloredIconCheckbox.state = Preferences.shared.useColoredMenuBarIcon ? .on : .off
+        let threads = Preferences.shared.transcriptionThreads
+        threadsField.integerValue = threads
+        threadsStepper.integerValue = threads
+        greedyCheckbox.state = Preferences.shared.greedyDecoding ? .on : .off
         updateConditionalRows()
     }
 
@@ -411,6 +444,12 @@ final class PreferencesWindowController: NSWindowController,
             keyCode: prefs.hotkeyKeyCode,
             flags: prefs.hotkeyModifierFlags
         )
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu === modelPopup.menu {
+            refreshModelPopup()
+        }
     }
 
     private func refreshModelPopup() {
@@ -507,6 +546,16 @@ final class PreferencesWindowController: NSWindowController,
     @objc private func coloredIconChanged() {
         Preferences.shared.useColoredMenuBarIcon = (coloredIconCheckbox.state == .on)
         onColoredIconChanged?()
+    }
+
+    @objc private func threadsStepperChanged() {
+        let value = threadsStepper.integerValue
+        threadsField.integerValue = value
+        Preferences.shared.transcriptionThreads = value
+    }
+
+    @objc private func greedyChanged() {
+        Preferences.shared.greedyDecoding = (greedyCheckbox.state == .on)
     }
 
     @objc private func exportPreferences() {
@@ -624,6 +673,10 @@ final class PreferencesWindowController: NSWindowController,
                 Preferences.shared.modelsDirectory = text
             }
             refreshModelPopup()
+        } else if (obj.object as? NSTextField) === threadsField {
+            let value = max(1, min(24, threadsField.integerValue))
+            threadsStepper.integerValue = value
+            Preferences.shared.transcriptionThreads = value
         }
     }
 
