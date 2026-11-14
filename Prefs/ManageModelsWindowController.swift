@@ -12,7 +12,7 @@ final class ManageModelsWindowController: NSWindowController {
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
@@ -49,6 +49,7 @@ final class ManageModelsWindowController: NSWindowController {
             row.onDownload = { [weak self] in self?.downloadCatalogEntry(entry) }
             row.onDelete = { [weak self] in self?.deleteDownloaded(entry) }
             row.onCancel = { [weak self] in self?.cancelDownload(entry) }
+            row.onUse = { [weak self] in self?.activate(filename: entry.filename) }
             rowViews[entry.filename] = row
             outer.addArrangedSubview(row)
         }
@@ -166,9 +167,12 @@ final class ManageModelsWindowController: NSWindowController {
                                      filename: filename,
                                      sizeBytes: size,
                                      url: nil,
-                                     isBundled: false)
+                                     isBundled: false,
+                                     minTier: .veryLow,
+                                     isCustom: true)
             let row = ModelRowView(entry: entry)
             row.onDelete = { [weak self] in self?.deleteExtra(filename: filename) }
+            row.onUse = { [weak self] in self?.activate(filename: filename) }
             extraRowViews[filename] = row
             customStack.addArrangedSubview(row)
         }
@@ -287,6 +291,12 @@ final class ManageModelsWindowController: NSWindowController {
         rowViews[entry.filename]?.cancelDownload()
     }
 
+    private func activate(filename: String) {
+        Preferences.shared.localModelFilename = filename
+        refreshAll()
+        onDidChange?()
+    }
+
     @objc private func revealModelsFolder() {
         let dir = Preferences.writableModelsDirectory
         try? FileManager.default.createDirectory(at: dir,
@@ -310,6 +320,19 @@ private final class FlippedContainer: NSView {
     override var isFlipped: Bool { return true }
 }
 
+// MARK: - DotView
+
+private final class DotView: NSView {
+    var fillColor: NSColor = .clear {
+        didSet { needsDisplay = true }
+    }
+    override var intrinsicContentSize: NSSize { return NSSize(width: 8, height: 8) }
+    override func draw(_ dirtyRect: NSRect) {
+        fillColor.setFill()
+        NSBezierPath(ovalIn: bounds).fill()
+    }
+}
+
 // MARK: - ModelRowView
 
 private final class ModelRowView: NSView {
@@ -317,8 +340,10 @@ private final class ModelRowView: NSView {
 
     private let nameLabel = NSTextField(labelWithString: "")
     private let sizeLabel = NSTextField(labelWithString: "")
+    private let statusDot = DotView()
     private let statusLabel = NSTextField(labelWithString: "")
     private let progressBar = NSProgressIndicator()
+    private let useButton = NSButton(title: "", target: nil, action: nil)
     private let actionButton = NSButton(title: "", target: nil, action: nil)
 
     private weak var activeDownloader: ModelDownloader?
@@ -326,6 +351,7 @@ private final class ModelRowView: NSView {
     var onDownload: (() -> Void)?
     var onDelete: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onUse: (() -> Void)?
 
     init(entry: CatalogModel) {
         self.entry = entry
@@ -352,26 +378,39 @@ private final class ModelRowView: NSView {
         progressBar.style = .bar
         progressBar.isHidden = true
 
+        useButton.bezelStyle = .rounded
+        useButton.target = self
+        useButton.action = #selector(useTapped)
+
         actionButton.bezelStyle = .rounded
         actionButton.target = self
         actionButton.action = #selector(actionTapped)
 
         let statusContainer = NSView()
         statusContainer.translatesAutoresizingMaskIntoConstraints = false
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let statusLine = NSStackView(views: [statusDot, statusLabel])
+        statusLine.orientation = .horizontal
+        statusLine.spacing = 6
+        statusLine.alignment = .centerY
+        statusLine.translatesAutoresizingMaskIntoConstraints = false
+
         progressBar.translatesAutoresizingMaskIntoConstraints = false
-        statusContainer.addSubview(statusLabel)
+        statusContainer.addSubview(statusLine)
         statusContainer.addSubview(progressBar)
         NSLayoutConstraint.activate([
-            statusLabel.leadingAnchor.constraint(equalTo: statusContainer.leadingAnchor),
-            statusLabel.trailingAnchor.constraint(equalTo: statusContainer.trailingAnchor),
-            statusLabel.centerYAnchor.constraint(equalTo: statusContainer.centerYAnchor),
+            statusLine.leadingAnchor.constraint(equalTo: statusContainer.leadingAnchor),
+            statusLine.trailingAnchor.constraint(lessThanOrEqualTo: statusContainer.trailingAnchor),
+            statusLine.centerYAnchor.constraint(equalTo: statusContainer.centerYAnchor),
             progressBar.leadingAnchor.constraint(equalTo: statusContainer.leadingAnchor),
             progressBar.trailingAnchor.constraint(equalTo: statusContainer.trailingAnchor),
-            progressBar.centerYAnchor.constraint(equalTo: statusContainer.centerYAnchor)
+            progressBar.centerYAnchor.constraint(equalTo: statusContainer.centerYAnchor),
+            statusDot.widthAnchor.constraint(equalToConstant: 8),
+            statusDot.heightAnchor.constraint(equalToConstant: 8)
         ])
 
-        let row = NSStackView(views: [nameLabel, sizeLabel, statusContainer, actionButton])
+        let row = NSStackView(views: [nameLabel, sizeLabel, statusContainer,
+                                      useButton, actionButton])
         row.orientation = .horizontal
         row.spacing = 10
         row.alignment = .centerY
@@ -386,6 +425,7 @@ private final class ModelRowView: NSView {
             nameLabel.widthAnchor.constraint(equalToConstant: 170),
             sizeLabel.widthAnchor.constraint(equalToConstant: 70),
             statusContainer.widthAnchor.constraint(equalToConstant: 130),
+            useButton.widthAnchor.constraint(equalToConstant: 68),
             actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 90)
         ])
     }
@@ -395,31 +435,69 @@ private final class ModelRowView: NSView {
         progressBar.isHidden = true
         progressBar.doubleValue = 0
         statusLabel.isHidden = false
-        if entry.isBundled {
-            statusLabel.stringValue = "Bundled"
-            actionButton.title = "—"
-            actionButton.isEnabled = false
-            return
-        }
-        switch ModelLocator.status(for: entry.filename) {
-        case .bundled:
-            statusLabel.stringValue = "Bundled"
-            actionButton.title = "—"
-            actionButton.isEnabled = false
-        case .downloaded:
+
+        // Reset to a non-rated appearance; the catalog branch below applies colors.
+        statusDot.fillColor = .clear
+        statusDot.isHidden = true
+        statusLabel.textColor = .secondaryLabelColor
+
+        let isActive = (entry.filename == Preferences.shared.localModelFilename)
+
+        if entry.isCustom {
             statusLabel.stringValue = "Downloaded"
             actionButton.title = "Delete"
             actionButton.isEnabled = true
+            configureUseButton(available: true, isActive: isActive)
+            return
+        }
+
+        // Every catalog entry (bundled or not) gets a colored recommendation.
+        let rec = ModelRecommendation.rate(minTier: entry.minTier)
+        statusDot.isHidden = false
+        statusDot.fillColor = rec.color
+        statusLabel.stringValue = rec.label
+        statusLabel.textColor = rec.color
+
+        if entry.isBundled {
+            actionButton.title = "—"
+            actionButton.isEnabled = false
+            configureUseButton(available: true, isActive: isActive)
+            return
+        }
+
+        switch ModelLocator.status(for: entry.filename) {
+        case .downloaded:
+            actionButton.title = "Delete"
+            actionButton.isEnabled = true
+            configureUseButton(available: true, isActive: isActive)
         case .available:
-            statusLabel.stringValue = "Not downloaded"
             actionButton.title = "Download"
             actionButton.isEnabled = true
+            configureUseButton(available: false, isActive: false)
+        case .bundled:
+            actionButton.title = "—"
+            actionButton.isEnabled = false
+            configureUseButton(available: true, isActive: isActive)
+        }
+    }
+
+    private func configureUseButton(available: Bool, isActive: Bool) {
+        if isActive {
+            useButton.title = "Active"
+            useButton.isEnabled = false
+        } else if available {
+            useButton.title = "Use"
+            useButton.isEnabled = true
+        } else {
+            useButton.title = "Use"
+            useButton.isEnabled = false
         }
     }
 
     func setDownloading(progress: Double, downloader: ModelDownloader) {
         activeDownloader = downloader
         statusLabel.isHidden = true
+        statusDot.isHidden = true
         progressBar.isHidden = false
         progressBar.doubleValue = progress
         actionButton.title = "Cancel"
@@ -441,5 +519,9 @@ private final class ModelRowView: NSView {
         case .downloaded: onDelete?()
         case .available: onDownload?()
         }
+    }
+
+    @objc private func useTapped() {
+        onUse?()
     }
 }

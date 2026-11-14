@@ -4,8 +4,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusController: StatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        maybeAutoSelectModel()
         statusController = StatusItemController()
         maybePromptMoveToApplications()
+    }
+
+    private func maybeAutoSelectModel() {
+        let prefs = Preferences.shared
+        if prefs.didAutoSelectModel { return }
+        let best = ModelCatalog.bestRecommendedPresent()
+        prefs.localModelFilename = best.filename
+        prefs.didAutoSelectModel = true
     }
 
     private func maybePromptMoveToApplications() {

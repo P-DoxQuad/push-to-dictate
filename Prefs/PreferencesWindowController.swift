@@ -518,6 +518,7 @@ final class PreferencesWindowController: NSWindowController,
         if models.isEmpty {
             modelPopup.addItem(withTitle: "(no models found)")
             modelPopup.isEnabled = false
+            applyModelPopupColor()
             return
         }
         modelPopup.isEnabled = true
@@ -527,6 +528,18 @@ final class PreferencesWindowController: NSWindowController,
         let current = Preferences.shared.localModelFilename
         if models.contains(current) {
             modelPopup.selectItem(withTitle: current)
+        }
+        applyModelPopupColor()
+    }
+
+    private func applyModelPopupColor() {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        for item in modelPopup.itemArray {
+            let color = ModelCatalog.color(forFilename: item.title) ?? .labelColor
+            item.attributedTitle = NSAttributedString(
+                string: item.title,
+                attributes: [.foregroundColor: color, .font: font]
+            )
         }
     }
 
@@ -571,6 +584,7 @@ final class PreferencesWindowController: NSWindowController,
     @objc private func modelChanged() {
         guard let title = modelPopup.selectedItem?.title, title.hasPrefix("ggml-") else { return }
         Preferences.shared.localModelFilename = title
+        applyModelPopupColor()
     }
 
     @objc private func injectionPasteSelected() {

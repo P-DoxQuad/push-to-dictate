@@ -127,7 +127,10 @@ API key stays in the Keychain (`kSecClassGenericPassword`, service `push-to-dict
 - **Transcription speed tuning** — `Preferences.transcriptionThreads` (stepper + field under Preferences → Advanced, 1 to the host's logical CPU count, default 6; hint reads *Max: N · Recommended: ⅓–½ of max*) and `Preferences.beamSize` (stepper + field, 1–10, default 5, user-facing label "Accuracy" with hint *1 = greedy (fastest) · 5 = default · 10 = thorough (slowest)*). Both get appended to the `whisper-cli` invocation as `-t`, `-bs`, `-bo` (beam-size doubles as best-of). Both read at transcribe time so changes take effect on the next dictation. `PreferencesWindowController` conforms to `NSMenuDelegate` and rescans the models folder in `menuNeedsUpdate(_:)` so newly dropped model files appear on the next click without reopening the window.
 - **Debug-recording toggle** — `Preferences.saveDebugRecordings` (default **off**) gates the `AudioRecorder` WAV writer. `~/Library/Application Support/push-to-dictate/debug/` no longer accumulates files during normal use. A **Clear Debug Recordings…** button in Preferences → Advanced empties the folder on demand with a count-and-confirm alert.
 - **Log maintenance** — **Clear Log…** button in Preferences → Advanced truncates `push-to-dictate.log` through `Logger.clear()`. `Logger.logFileURL` is exposed statically so the UI can show the path in the confirmation alert.
-- **Model management** — `Prefs/ModelCatalog.swift` defines a fixed catalog of four Q8_0 models (tiny.en, base.en, small.en, medium.en) with filename, display name, size, HuggingFace URL, and an `isBundled: Bool` that is authoritative (tiny.en + base.en are always "Bundled" in the UI regardless of filesystem state). `Prefs/ModelDownloader.swift` drives a `URLSessionDownloadTask` per download, verifies the `ggml`/`lmgg` magic header before writing to the destination, and reports progress + completion through closures. `Prefs/ManageModelsWindowController.swift` is the UI — opened from a **Manage Models…** button next to the Local model popup via `beginSheet(_:completionHandler:)`. Layout: fixed catalog section (one row per entry — name, size, status, action button), fixed "Custom models" header, scrollable list of any `ggml-*.bin` files in the writable folder that aren't in the catalog, fixed bottom with a custom-URL text field + Download button, **Reveal Models Folder**, and **Close**. The progress bar for a download overlays the status-label slot so nothing shifts when a download starts.
+- **Model management** — `Prefs/ModelCatalog.swift` defines a fixed catalog of five Q8_0 models (tiny.en, base.en, small.en, medium.en, large-v3-turbo). Each `CatalogModel` has filename, display name, size, HuggingFace URL, `isBundled: Bool` (tiny + base), `minTier: HardwareTier`, and `isCustom: Bool`. `Prefs/ModelDownloader.swift` drives a `URLSessionDownloadTask` per download, verifies the `ggml`/`lmgg` magic header before writing to the destination, and reports progress + completion through closures. `Prefs/ManageModelsWindowController.swift` is the UI — opened from a **Manage Models…** button next to the Local model popup via `beginSheet(_:completionHandler:)`. Layout: fixed catalog section (one row per entry), fixed "Custom models" header, scrollable list of any `ggml-*.bin` files in the writable folder that aren't in the catalog, fixed bottom with a custom-URL text field + Download button, **Reveal Models Folder**, and **Close**. Each row has a status slot (colored dot + colored label), a **Use / Active** button (sets `Preferences.localModelFilename`; the current model shows "Active" disabled), and an action button (Download / Delete / — for bundled / Cancel while downloading). The progress bar overlays the status slot so nothing shifts horizontally during a download.
+- **Hardware tiering** — `HardwareTier` (very-low / low / mid / high) classified from `sysctl hw.optional.avx2_0`, `hw.optional.fma`, and `activeProcessorCount`. `ModelRecommendation.rate(minTier:host:)` returns `.recommended` / `.slow` / `.notRecommended` with matching `systemGreen` / `systemOrange` / `systemRed` color. Each catalog entry declares the minimum tier it's useful on (tiny/base = very-low, small = low, medium = mid, large-v3-turbo = high). Ratings apply to bundled rows too; the disabled "—" action button is the only "bundled" signal in the row.
+- **First-launch auto-pick** — `Preferences.didAutoSelectModel` guards a one-time call in `AppDelegate.applicationDidFinishLaunching` that picks the highest-tier catalog entry which is both present on disk (bundled or downloaded) and rated `.recommended` for the host. Only fires once; after that the user's selection is authoritative. Backed up alongside the rest of the UserDefaults so a restore doesn't re-trigger it.
+- **Model-picker coloring** — the Local model popup in Preferences → Transcription colors each `ggml-*.bin` entry's title to match the Manage Models recommendation (green / orange / red for catalog entries, default label color for custom). Applied by setting `attributedTitle` on each `NSMenuItem` (setting it on `NSPopUpButtonCell` doesn't take — the cell draws from the menu item on macOS 10.13).
 - **Models-folder resolution rewrite** — bundled models are always discovered; `Preferences.modelsDirectory` (if set) only redirects the *writable* half, where downloads land and extras are read from. `Preferences.writableModelsDirectory` is `modelsDirectory` when set, otherwise `~/Library/Application Support/push-to-dictate/models/`. Picker scans *bundle ∪ writable* on every dropdown open. `whisperModelPath` resolves bundle first, then writable. Default `Preferences.localModelFilename` is `ggml-base.en-q8_0.bin` to match the new default bundled set. The **Clear** button on the Models folder field was renamed **Default** and resets the field to the writable default path.
 - **About / Credits dialog** — deferred.
 
@@ -578,3 +581,41 @@ Previously `Preferences.modelsDirectory` was an override that *replaced* the bun
 - **Auto-detect thread default** — unchanged.
 - **Per-app override for injection method.**
 - **About / Credits dialog.**
+
+### 2026-11-14 — Model recommendations, Use button, first-launch pick
+
+#### Catalog grew by one
+
+Added `large-v3-turbo-q8_0` (874 MB) to `ModelCatalog.entries`. The straight `large-q8_0` and `large-v3-q8_0` 404 on HuggingFace — turbo is the practical "biggest model you'd actually run on CPU" today. No `.en`-only variants exist for large; the model is multilingual.
+
+#### Hardware tiering
+
+`HardwareTier` enum (very-low / low / mid / high) classified from `sysctl hw.optional.avx2_0` + `hw.optional.fma` + `ProcessInfo.processInfo.activeProcessorCount`. AVX2+FMA + ≥8 cores → high; AVX2+FMA + <8 → mid; no AVX2 + ≥8 → low; else very-low. This X5650 lands at low (no AVX2, 24 logical cores).
+
+`ModelRecommendation` has three states (`.recommended` / `.slow` / `.notRecommended`) with matching `systemGreen` / `systemOrange` / `systemRed`. `rate(minTier:host:)`:
+
+- `host > minTier` → `.recommended`
+- `host == minTier` → `.slow`
+- `host < minTier` → `.notRecommended`
+
+Catalog `minTier` assignments: tiny / base = very-low, small = low, medium = mid, large-v3-turbo = high. On this host that produces: tiny/base Recommended, small Slow, medium / large-turbo Not recommended — matches lived experience.
+
+#### Row UI
+
+Each `ModelRowView` grew two things: a small 8-point `DotView` (custom `NSView`, `NSBezierPath(ovalIn:).fill()`) that sits next to the status label, and a dedicated **Use / Active** button between the status slot and the Download/Delete action button. Row layout is now `[name | size | dot + status | Use | action]`. Button logic:
+
+- **Use** enabled when the row is downloaded or bundled and not already the active model.
+- **Active** disabled when `entry.filename == Preferences.shared.localModelFilename`.
+- Hidden-but-space-preserved (title "Use", disabled) when the model isn't on disk — so columns never shift as rows change state.
+
+Dot + colored label apply to every catalog entry, bundled or not. The disabled "—" on the action column is the only "this is bundled" signal.
+
+Progress-bar overlay logic unchanged: during a download both the dot and the label hide, the progress bar takes their slot, nothing moves horizontally.
+
+#### First-launch auto-pick
+
+`Preferences.didAutoSelectModel` (Bool). `AppDelegate.applicationDidFinishLaunching` calls `maybeAutoSelectModel()` which, if the flag is false, runs `ModelCatalog.bestRecommendedPresent()` — picks the highest-`minTier` catalog entry that's both already present on disk (bundled or downloaded) and rated `.recommended`. Falls back to the first bundled entry if nothing qualifies. Sets the flag so future launches never auto-pick. Included in `allUserDefaultsKeys` so a backup restore carries over the "already auto-picked" state and doesn't clobber the user's choice.
+
+#### Picker coloring
+
+Preferences → Transcription Local model popup now colors every `ggml-*.bin` entry — both the dropdown list and the currently-selected display — to match the Manage Models recommendation dot (green/orange/red for catalog, `.labelColor` for custom). First attempt set `attributedTitle` on `NSPopUpButtonCell` which doesn't take on 10.13 — the cell draws from the selected `NSMenuItem`. Fixed by setting `attributedTitle` on each `NSMenuItem` directly. Applied in `refreshModelPopup` (after items are added and selection restored) and after `modelChanged`.

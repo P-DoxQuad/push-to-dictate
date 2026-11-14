@@ -31,6 +31,7 @@ final class Preferences {
         static let transcriptionThreads = "transcriptionThreads"
         static let beamSize = "beamSize"
         static let saveDebugRecordings = "saveDebugRecordings"
+        static let didAutoSelectModel = "didAutoSelectModel"
     }
 
     static let noSoundName = "None"
@@ -132,6 +133,11 @@ final class Preferences {
     var saveDebugRecordings: Bool {
         get { return defaults.bool(forKey: Key.saveDebugRecordings) }
         set { defaults.set(newValue, forKey: Key.saveDebugRecordings) }
+    }
+
+    var didAutoSelectModel: Bool {
+        get { return defaults.bool(forKey: Key.didAutoSelectModel) }
+        set { defaults.set(newValue, forKey: Key.didAutoSelectModel) }
     }
 
     static var debugRecordingsDirectory: URL {
@@ -236,7 +242,7 @@ final class Preferences {
         Key.logEverything, Key.useColoredMenuBarIcon,
         Key.suppressedMoveToApplicationsPrompt,
         Key.transcriptionThreads, Key.beamSize,
-        Key.saveDebugRecordings
+        Key.saveDebugRecordings, Key.didAutoSelectModel
     ]
 
     // MARK: - Keychain
