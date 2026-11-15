@@ -6,12 +6,12 @@ Runs on CPU. No GPU, Neural Engine, or network connection is used by the local b
 
 ## Version
 
-2026.11.0 (CalVer: `YYYY.MM.PATCH`).
+2026.11.1 (CalVer: `YYYY.MM.PATCH`).
 
 ## Supported platforms
 
 - macOS 10.11 El Capitan through macOS 15 Sequoia.
-- Intel x86_64 CPUs. Targets Nehalem microarchitecture and newer. Westmere (Mac Pro 5,1), Sandy Bridge, Ivy Bridge, Haswell, Broadwell, Skylake, and later all qualify. SSE4.2 required; AVX / AVX2 / FMA / F16C are not required and explicitly disabled in the whisper.cpp build.
+- Intel x86_64 CPUs, Nehalem microarchitecture or newer. Covers every Intel Mac from 2009 onward: Mac Pro 4,1 and 5,1, every iMac, MacBook Pro, MacBook Air, MacBook, Mac mini, iMac Pro, and Intel Mac Pro 7,1. SSE4.2 required; AVX / AVX2 / FMA / F16C are not required and explicitly disabled in the whisper.cpp build.
 - Apple Silicon runs the binary under Rosetta 2. Native arm64 is not currently targeted.
 
 ## Capabilities
@@ -29,7 +29,7 @@ Runs on CPU. No GPU, Neural Engine, or network connection is used by the local b
 
 ### Pre-built application
 
-`Push-to-Dictate-v2026.11.0-Full.zip` is attached to each release at https://github.com/P-DoxQuad/push-to-dictate/releases. The archive expands to `Push to Dictate.app`. Installation location: `/Applications/`.
+`Push-to-Dictate-v2026.11.1-Full.zip` is attached to each release at https://github.com/P-DoxQuad/push-to-dictate/releases. The archive expands to `Push to Dictate.app`. Installation location: `/Applications/`.
 
 ### Build from source
 
