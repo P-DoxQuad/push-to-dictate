@@ -71,13 +71,18 @@ struct CatalogModel {
     let isCustom: Bool
 }
 
+// Catalog of local inference models downloadable from the project's own
+// GitHub Release asset tag. The "openai-models-v1" tag name refers to the
+// origin of the Whisper weights (OpenAI's open-source speech model), not the
+// OpenAI cloud backend. These files are consumed by whisper-cli on CPU and
+// never leave the user's machine.
 enum ModelCatalog {
     static let entries: [CatalogModel] = [
         CatalogModel(
             displayName: "tiny.en (Q8_0)",
             filename: "ggml-tiny.en-q8_0.bin",
             sizeBytes: 43_550_795,
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q8_0.bin")!,
+            url: URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases/download/openai-models-v1/ggml-tiny.en-q8_0.bin")!,
             isBundled: true,
             minTier: .veryLow,
             isCustom: false
@@ -86,7 +91,7 @@ enum ModelCatalog {
             displayName: "base.en (Q8_0)",
             filename: "ggml-base.en-q8_0.bin",
             sizeBytes: 81_768_586,
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q8_0.bin")!,
+            url: URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases/download/openai-models-v1/ggml-base.en-q8_0.bin")!,
             isBundled: true,
             minTier: .veryLow,
             isCustom: false
@@ -95,7 +100,7 @@ enum ModelCatalog {
             displayName: "small.en (Q8_0)",
             filename: "ggml-small.en-q8_0.bin",
             sizeBytes: 264_477_561,
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-q8_0.bin")!,
+            url: URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases/download/openai-models-v1/ggml-small.en-q8_0.bin")!,
             isBundled: false,
             minTier: .low,
             isCustom: false
@@ -104,7 +109,7 @@ enum ModelCatalog {
             displayName: "medium.en (Q8_0)",
             filename: "ggml-medium.en-q8_0.bin",
             sizeBytes: 823_382_461,
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en-q8_0.bin")!,
+            url: URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases/download/openai-models-v1/ggml-medium.en-q8_0.bin")!,
             isBundled: false,
             minTier: .mid,
             isCustom: false
@@ -113,7 +118,7 @@ enum ModelCatalog {
             displayName: "large-v3-turbo (Q8_0)",
             filename: "ggml-large-v3-turbo-q8_0.bin",
             sizeBytes: 874_188_075,
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin")!,
+            url: URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases/download/openai-models-v1/ggml-large-v3-turbo-q8_0.bin")!,
             isBundled: false,
             minTier: .high,
             isCustom: false

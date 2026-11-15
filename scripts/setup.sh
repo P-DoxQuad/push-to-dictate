@@ -10,17 +10,20 @@ set -euo pipefail
 
 # --- Config -----------------------------------------------------------------
 
-# Whisper.cpp upstream and pinned revision.
-# Flip WHISPER_REPO to your own fork once created; v1.7.2 is the last tag
-# before whisper.cpp requires C++17 <filesystem> (unavailable on macOS 10.13
-# with Xcode 10.1).
-WHISPER_REPO="${WHISPER_REPO:-https://github.com/ggerganov/whisper.cpp}"
+# Whisper.cpp source. Points at a preservation fork of ggerganov/whisper.cpp
+# pinned at v1.7.2 (the last tag before whisper.cpp requires C++17 <filesystem>,
+# which is unavailable on macOS 10.13 with Xcode 10.1).
+WHISPER_REPO="${WHISPER_REPO:-https://github.com/P-DoxQuad/whisper.cpp}"
 WHISPER_COMMIT="${WHISPER_COMMIT:-v1.7.2}"
 
-# Models bundled inside the .app at build time. Hugging Face is the current
-# source; once preservation copies are uploaded as GitHub Release assets on
-# this repo, flip MODEL_BASE_URL to the Release download URL.
-MODEL_BASE_URL="${MODEL_BASE_URL:-https://huggingface.co/ggerganov/whisper.cpp/resolve/main}"
+# Models bundled inside the .app at build time. Served from the project's own
+# GitHub Release asset tag, independent of Hugging Face uptime. The tag name
+# "openai-models-v1" refers to the origin of the Whisper weights (OpenAI's
+# open-source speech model), not the OpenAI cloud backend the app can call
+# into. These are local ggml-quantized files consumed by whisper-cli; they
+# have no network component. Future backends with different model families
+# will be namespaced under their own tags (e.g. meta-models-v1).
+MODEL_BASE_URL="${MODEL_BASE_URL:-https://github.com/P-DoxQuad/push-to-dictate/releases/download/openai-models-v1}"
 
 # Space-separated "filename:sha256" pairs. Empty sha256 skips verification for
 # that entry. Hashes will be filled in once preservation copies are hosted.
