@@ -69,9 +69,12 @@ enum UpdateChecker {
 
     // Component-wise integer compare of dot-separated CalVer strings.
     // Missing components (e.g. "2026.11.0" vs "2026.11.0.1") pad with 0.
+    // Each component is parsed as its leading run of digits, so suffixes like
+    // "-Full" or "-rc1" on the final component are ignored instead of causing
+    // an Int() parse failure that silently zeroes the component.
     static func compareVersions(_ a: String, _ b: String) -> ComparisonResult {
-        let aParts = a.split(separator: ".").map { Int($0) ?? 0 }
-        let bParts = b.split(separator: ".").map { Int($0) ?? 0 }
+        let aParts = a.split(separator: ".").map { leadingInt($0) }
+        let bParts = b.split(separator: ".").map { leadingInt($0) }
         let count = max(aParts.count, bParts.count)
         for i in 0..<count {
             let ai = i < aParts.count ? aParts[i] : 0
@@ -80,5 +83,10 @@ enum UpdateChecker {
             if ai < bi { return .orderedAscending }
         }
         return .orderedSame
+    }
+
+    private static func leadingInt<S: StringProtocol>(_ s: S) -> Int {
+        let digits = s.prefix(while: { $0.isNumber })
+        return Int(digits) ?? 0
     }
 }
