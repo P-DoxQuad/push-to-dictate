@@ -721,3 +721,4 @@ Also in this pass:
 - Preferences → Advanced Accuracy hint shortened from "1 = greedy (fastest) · 5 = default · 10 = thorough (slowest)" to "1 = fastest · 5 = default · 10 = slowest".
 - Preferences → Transcription pane rewrapped in a vertical `NSStackView` of `buildRowView`-produced row containers so hiding `transcriptionModelRow`/`transcriptionModelsFolderRow`/`transcriptionApiKeyRow` when the backend switches to OpenAI collapses the row *and* its inter-row spacing. Previously the API-key row sat where the folder row had been, leaving a visible gap.
 - `README.md` picked up a "Menu bar menu" section describing the status-item menu items, including the new Help entry.
+- Welcome / hover popover body text updated to point users at Help: "Press <hotkey> to start dictation. Click the icon for Help and more options." The `<hotkey>` placeholder resolves to the user's current binding via `PreferencesWindowController.describe(...)`.

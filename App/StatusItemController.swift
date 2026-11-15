@@ -493,7 +493,7 @@ final class StatusItemController: NSObject,
         let body = NSTextField(frame: .zero)
         body.isEditable = false; body.isSelectable = false
         body.isBordered = false; body.drawsBackground = false
-        body.stringValue = "Press \(hotkey) to start dictation. Click the icon for more options."
+        body.stringValue = "Press \(hotkey) to start dictation. Click the icon for Help and more options."
         body.lineBreakMode = .byWordWrapping
         body.cell?.wraps = true
         body.cell?.isScrollable = false
