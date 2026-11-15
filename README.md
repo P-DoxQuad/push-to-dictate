@@ -29,7 +29,7 @@ Runs on CPU. No GPU, Neural Engine, or network connection is used by the local b
 
 ### Pre-built application
 
-`Push-to-Dictate-v2026.11.0-Full.zip` is attached to each release at https://github.com/P-DoxQuad/push-to-dictate/releases. The archive expands to `Push to Dictate.app`. Installation location: `/Applications/`.
+`Push-to-Dictate-v2026.11.1-Full.zip` is attached to each release at https://github.com/P-DoxQuad/push-to-dictate/releases. The archive expands to `Push to Dictate.app`. Installation location: `/Applications/`.
 
 ### Build from source
 

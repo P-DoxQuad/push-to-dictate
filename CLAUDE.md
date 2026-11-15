@@ -84,11 +84,12 @@ Branching model:
 
 - `main`: active development. Always ahead of the latest shipped version.
 - `release/vN.M`: frozen at a shipped version's state. One per shipped `MAJOR.MINOR`. Only touched for backports.
-- Tags: immutable. One per shipped release, named with the CalVer version prefixed with `v`.
+- Tags: immutable once external consumers have depended on them. Same-day force-moves are allowed to correct an objectively wrong tagged commit (stale docs, bad metadata, wrong SHA) before third parties have pulled it. One per shipped release, named with the CalVer version prefixed with `v`.
 
 Release cutting:
 
 - Confirm `CFBundleShortVersionString` and `PQDisplayVersion` in `App/Info.plist` match the release being cut (CalVer and SemVer respectively).
+- Sweep `README.md` for stale version references: the `## Version` line, the zip filename in `## Installation`, and anywhere else the previous CalVer appears. Update in the same commit before tagging.
 - Tag the release commit with the CalVer version prefixed with `v`.
 - Branch `release/vN.M` from that tag.
 - Push the tag and the branch to `origin`.
