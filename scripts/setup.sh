@@ -17,11 +17,17 @@ set -euo pipefail
 WHISPER_REPO="${WHISPER_REPO:-https://github.com/ggerganov/whisper.cpp}"
 WHISPER_COMMIT="${WHISPER_COMMIT:-v1.7.2}"
 
-# Model: Hugging Face is the default source; flip MODEL_URL to a GitHub
-# Release asset URL on this repo once you've uploaded a preservation copy.
-MODEL_URL="${MODEL_URL:-https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin}"
-MODEL_FILENAME="ggml-small.en.bin"
-MODEL_SHA256="c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"
+# Models bundled inside the .app at build time. Hugging Face is the current
+# source; once preservation copies are uploaded as GitHub Release assets on
+# this repo, flip MODEL_BASE_URL to the Release download URL.
+MODEL_BASE_URL="${MODEL_BASE_URL:-https://huggingface.co/ggerganov/whisper.cpp/resolve/main}"
+
+# Space-separated "filename:sha256" pairs. Empty sha256 skips verification for
+# that entry. Hashes will be filled in once preservation copies are hosted.
+BUNDLED_MODELS=(
+    "ggml-tiny.en-q8_0.bin:"
+    "ggml-base.en-q8_0.bin:"
+)
 
 # CMake flags for Mac Pro 5,1 class Xeons (Westmere) and earlier Nehalem CPUs.
 # AVX / AVX2 / FMA / F16C are not supported; default whisper.cpp builds die
@@ -53,7 +59,6 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VENDOR_DIR="${REPO_ROOT}/vendor"
 WHISPER_DIR="${VENDOR_DIR}/whisper.cpp"
 MODELS_DIR="${VENDOR_DIR}/models"
-MODEL_PATH="${MODELS_DIR}/${MODEL_FILENAME}"
 
 # --- Locate cmake -----------------------------------------------------------
 
@@ -110,14 +115,16 @@ if ! "${BUILT_CLI}" --help >/dev/null 2>&1; then
     exit 1
 fi
 
-# --- Download model ---------------------------------------------------------
+# --- Download bundled models ------------------------------------------------
 
 verify_model() {
+    local path="$1"
+    local expected="$2"
     local actual
-    actual="$(shasum -a 256 "${MODEL_PATH}" | awk '{print $1}')"
-    if [ "${actual}" != "${MODEL_SHA256}" ]; then
-        echo "error: ${MODEL_FILENAME} SHA256 mismatch" >&2
-        echo "  expected: ${MODEL_SHA256}" >&2
+    actual="$(shasum -a 256 "${path}" | awk '{print $1}')"
+    if [ "${actual}" != "${expected}" ]; then
+        echo "error: $(basename "${path}") SHA256 mismatch" >&2
+        echo "  expected: ${expected}" >&2
         echo "  actual:   ${actual}" >&2
         return 1
     fi
@@ -126,22 +133,35 @@ verify_model() {
 
 mkdir -p "${MODELS_DIR}"
 
-if [ -f "${MODEL_PATH}" ]; then
-    if verify_model; then
-        echo "==> Model already present and SHA256 verified"
-    else
-        echo "==> Model present but SHA256 mismatch — re-downloading"
-        rm -f "${MODEL_PATH}"
-    fi
-fi
+for entry in "${BUNDLED_MODELS[@]}"; do
+    filename="${entry%%:*}"
+    sha256="${entry#*:}"
+    path="${MODELS_DIR}/${filename}"
+    url="${MODEL_BASE_URL}/${filename}"
 
-if [ ! -f "${MODEL_PATH}" ]; then
-    echo "==> Downloading ${MODEL_FILENAME} from ${MODEL_URL}"
-    curl -L --progress-bar -o "${MODEL_PATH}" "${MODEL_URL}"
-    verify_model
-fi
+    if [ -f "${path}" ]; then
+        if [ -n "${sha256}" ]; then
+            if verify_model "${path}" "${sha256}"; then
+                echo "==> ${filename} already present and SHA256 verified"
+                continue
+            else
+                echo "==> ${filename} present but SHA256 mismatch, re-downloading"
+                rm -f "${path}"
+            fi
+        else
+            echo "==> ${filename} already present (no hash pinned, skipping verify)"
+            continue
+        fi
+    fi
+
+    echo "==> Downloading ${filename} from ${url}"
+    curl -L --progress-bar -o "${path}" "${url}"
+    if [ -n "${sha256}" ]; then
+        verify_model "${path}" "${sha256}"
+    fi
+done
 
 echo ""
 echo "==> Setup complete."
 echo "    whisper-cli: ${BUILT_CLI}"
-echo "    model:       ${MODEL_PATH}"
+echo "    models:      ${MODELS_DIR}/"

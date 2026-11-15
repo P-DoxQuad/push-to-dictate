@@ -117,4 +117,4 @@ vendor/        Gitignored. Populated by setup.sh.
 
 ## License
 
-TBD. Third-party components retain their original licenses. Full text: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+MIT. See [`LICENSE`](LICENSE). Third-party components retain their original licenses. Full text: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

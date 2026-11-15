@@ -243,9 +243,9 @@ Target machine CPU is Intel Xeon X5650 (Westmere-EP). Instruction sets present: 
 
 #### Source layout — three locations, each with a specific reason
 
-1. **`/Volumes/Data-RAID/Users/mdzura/Documents/Projects/Sandbox/whisper.cpp/`** — standalone upstream clone of the whisper.cpp repository. Not tied to push-to-dictate. Reusable across any future project that needs whisper.cpp. Follows the user's existing Sandbox convention (Chromium Source, Firefox source, etc.).
-2. **`/Volumes/Data-RAID/Users/mdzura/Documents/Projects/Sandbox/push-to-dictate/vendor/whisper.cpp/`** — project-local copy of the source, created by `rsync` from (1) with the upstream `.git` directory kept intact. This is what we actually build against for push-to-dictate. Pinned at whatever commit we rsynced; independent of upstream updates to (1).
-3. **`/Volumes/Data-RAID/Users/mdzura/Documents/Projects/Sandbox/push-to-dictate/vendor/models/ggml-small.en.bin`** — the model file. ~465 MB. Lives inside the project's `vendor/` tree because it's an external artifact bound to this specific project build.
+1. **Upstream whisper.cpp clone** (outside this repo, in the local workspace): standalone clone of the whisper.cpp repository. Not tied to push-to-dictate. Reusable across any future project that needs whisper.cpp.
+2. **`vendor/whisper.cpp/`** (project-relative): project-local copy of the source, created by `rsync` from (1) with the upstream `.git` directory kept intact. This is what we actually build against for push-to-dictate. Pinned at whatever commit we rsynced; independent of upstream updates to (1).
+3. **`vendor/models/ggml-small.en.bin`** (project-relative): the model file. ~465 MB. Lives inside the project's `vendor/` tree because it's an external artifact bound to this specific project build.
 
 #### Model acquisition — source URL
 
