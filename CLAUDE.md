@@ -25,6 +25,36 @@ Applies to all project docs (CLAUDE.md, README.md, DEVLOG.md, THIRD_PARTY_NOTICE
 - Source layout: `App/`, `Core/`, `Transcribers/`, `Prefs/`, `icons/`.
 - whisper.cpp: pinned to v1.7.2. Build `whisper-cli` for x86_64 via `scripts/setup.sh`. Models bundled in `.app/Contents/Resources/`; writable fallback is `~/Library/Application Support/push-to-dictate/models/`.
 
+## UI copy
+
+Applies to all user-facing strings: labels, hints, placeholders, button titles, tooltips, menu items, dialog messages, status text, error messages. Based on Nielsen Norman Group, Apple HIG, and Material Design practice.
+
+**Tone**
+
+- Declarative, third-person or imperative. Not conversational.
+- No second-person addressing: "you", "your", "if you want", "so that your", "to make sure".
+- Declarative advice is allowed and standard practice: "Recommended for X", "Best for Y", "Higher = more X", "Lower = more Y". These are directional facts, not conversation.
+- Plain language. No jargon unless the domain requires it.
+
+**Content**
+
+- Each string informs, influences behavior, or supports the interaction. Nothing decorative.
+- Facts are encouraged: units, defaults, ranges, min/max, scale explanations ("1 = fastest · 5 = default · 10 = slowest").
+- Hint text is warranted when the input format is unusual, a domain rule applies, or the user might reasonably wonder how the value affects the system.
+- Do not restate facts the control already shows by its current state (current value, enabled/disabled, selected option).
+- Placeholder shows format. Label names the field. Never substitute placeholder for label.
+
+**Form**
+
+- One line when possible. Scannable over paragraphed.
+- No marketing language, no inspirational framing, no "designed to", no "built for".
+
+**Errors**
+
+- Error text replaces helper text in the same slot, not appended. Prevents layout shift.
+- Errors appear next to the offending field, not at the top of the form.
+- No early validation that interrupts typing.
+
 ## Code
 
 - Comments minimum. Only on non-trivial code, non-obvious arguments, non-obvious member semantics. Never narrate what the code does.

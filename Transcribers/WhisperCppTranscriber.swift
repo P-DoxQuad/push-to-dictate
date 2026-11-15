@@ -102,15 +102,39 @@ final class WhisperCppTranscriber: Transcriber {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        // Drain both pipes concurrently during execution. Without this, long
+        // transcriptions fill the ~16-64KB pipe buffer, whisper-cli blocks on
+        // write, and waitUntilExit() deadlocks.
+        var outData = Data()
+        var errData = Data()
+        let dataLock = NSLock()
+        stdoutPipe.fileHandleForReading.readabilityHandler = { fh in
+            let d = fh.availableData
+            if d.isEmpty { fh.readabilityHandler = nil; return }
+            dataLock.lock(); outData.append(d); dataLock.unlock()
+        }
+        stderrPipe.fileHandleForReading.readabilityHandler = { fh in
+            let d = fh.availableData
+            if d.isEmpty { fh.readabilityHandler = nil; return }
+            dataLock.lock(); errData.append(d); dataLock.unlock()
+        }
+
         process.launch()
         process.waitUntilExit()
 
-        let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+        let finalOut = stdoutPipe.fileHandleForReading.availableData
+        let finalErr = stderrPipe.fileHandleForReading.availableData
+        dataLock.lock()
+        outData.append(finalOut)
+        errData.append(finalErr)
+        dataLock.unlock()
+
         let text = String(data: outData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         if process.terminationStatus != 0 {
-            let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
             let errText = String(data: errData, encoding: .utf8) ?? ""
             let snippet = String(errText.suffix(400))
             throw NSError(domain: "WhisperCppTranscriber",

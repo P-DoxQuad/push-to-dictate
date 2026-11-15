@@ -7,6 +7,13 @@ final class AudioRecorder {
 
     var onLevel: ((Float) -> Void)?
     var onCaptureSaved: ((URL) -> Void)?
+    var onAutoStopTriggered: (() -> Void)?
+
+    // Set to non-nil to enable silence-based auto-stop. Threshold is the RMS
+    // floor below which audio counts as silent; duration is how many seconds
+    // of continuous silence must elapse before onAutoStopTriggered fires once.
+    var autoStopThreshold: Float?
+    var autoStopDuration: TimeInterval?
 
     private(set) var peakRMS: Float = 0
 
@@ -15,11 +22,15 @@ final class AudioRecorder {
     private var outputFormat: AVAudioFormat?
     private var buffer: [Float] = []
     private let bufferQueue = DispatchQueue(label: "push-to-dictate.audio.buffer")
+    private var silentSince: Date?
+    private var autoStopFired: Bool = false
 
     func start() throws {
         if engine.isRunning { return }
 
         peakRMS = 0
+        silentSince = nil
+        autoStopFired = false
         try applyPreferredInputDevice()
 
         let inputNode = engine.inputNode
@@ -84,6 +95,23 @@ final class AudioRecorder {
         if level > peakRMS { peakRMS = level }
         if let onLevel = onLevel {
             DispatchQueue.main.async { onLevel(level) }
+        }
+
+        if !autoStopFired,
+           let threshold = autoStopThreshold,
+           let duration = autoStopDuration {
+            if level < threshold {
+                if silentSince == nil {
+                    silentSince = Date()
+                } else if Date().timeIntervalSince(silentSince!) >= duration {
+                    autoStopFired = true
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onAutoStopTriggered?()
+                    }
+                }
+            } else {
+                silentSince = nil
+            }
         }
 
         let outCapacity = AVAudioFrameCount(

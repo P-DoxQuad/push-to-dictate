@@ -116,6 +116,24 @@ final class PreferencesWindowController: NSWindowController,
         b.title = "Clear Log…"
         return b
     }()
+    private let silenceAutoStopCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Auto-stop after silence (Toggle mode only)"
+        return b
+    }()
+    private let silenceThresholdField = NSTextField()
+    private let silenceSecondsField = NSTextField()
+    private let typedDelayField = NSTextField()
+    private let typedDelayStepper = NSStepper()
+
+    // Labels for numeric fields that use range validation. Captured during
+    // layout so the delegate can toggle their text color on invalid input.
+    private var threadsLabel: NSTextField?
+    private var beamLabel: NSTextField?
+    private var typedDelayLabel: NSTextField?
+    private var silenceThresholdLabel: NSTextField?
+    private var silenceSecondsLabel: NSTextField?
 
     // MARK: - State
 
@@ -248,6 +266,19 @@ final class PreferencesWindowController: NSWindowController,
         clearDebugRecordingsButton.action = #selector(clearDebugRecordings)
         clearLogButton.target = self
         clearLogButton.action = #selector(clearLog)
+
+        silenceAutoStopCheckbox.target = self
+        silenceAutoStopCheckbox.action = #selector(silenceAutoStopChanged)
+        silenceThresholdField.delegate = self
+        silenceSecondsField.delegate = self
+
+        typedDelayStepper.minValue = 5
+        typedDelayStepper.maxValue = 100
+        typedDelayStepper.increment = 1
+        typedDelayStepper.valueWraps = false
+        typedDelayStepper.target = self
+        typedDelayStepper.action = #selector(typedDelayStepperChanged)
+        typedDelayField.delegate = self
     }
 
     // MARK: - Layout (split view: sidebar + content)
@@ -359,6 +390,18 @@ final class PreferencesWindowController: NSWindowController,
                           topAnchor: NSLayoutYAxisAnchor,
                           topConstant: CGFloat,
                           labelWidth: CGFloat) -> NSLayoutYAxisAnchor {
+        return placeRowWithLabel(labelText: labelText, control: control, in: pane,
+                                 topAnchor: topAnchor, topConstant: topConstant,
+                                 labelWidth: labelWidth).bottom
+    }
+
+    private func placeRowWithLabel(labelText: String,
+                                   control: NSView,
+                                   in pane: NSView,
+                                   topAnchor: NSLayoutYAxisAnchor,
+                                   topConstant: CGFloat,
+                                   labelWidth: CGFloat)
+        -> (bottom: NSLayoutYAxisAnchor, label: NSTextField) {
         let label = makeLabel(labelText)
         control.translatesAutoresizingMaskIntoConstraints = false
         pane.addSubview(label)
@@ -372,7 +415,7 @@ final class PreferencesWindowController: NSWindowController,
             control.topAnchor.constraint(equalTo: topAnchor, constant: topConstant),
             pane.trailingAnchor.constraint(greaterThanOrEqualTo: control.trailingAnchor)
         ])
-        return control.bottomAnchor
+        return (control.bottomAnchor, label)
     }
 
     // Variant for conditionally-hidden rows. Wraps the row in an NSView
@@ -497,8 +540,32 @@ final class PreferencesWindowController: NSWindowController,
     private func buildAudioPane() -> NSView {
         let pane = NSView()
         pane.translatesAutoresizingMaskIntoConstraints = false
+
+        silenceThresholdField.translatesAutoresizingMaskIntoConstraints = false
+        silenceThresholdField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let thresholdHint = NSTextField(frame: .zero)
+        thresholdHint.isEditable = false; thresholdHint.isSelectable = false
+        thresholdHint.isBordered = false; thresholdHint.drawsBackground = false
+        thresholdHint.textColor = .secondaryLabelColor
+        thresholdHint.stringValue = "RMS level · default 0.01 · lower = more sensitive"
+        let thresholdRow = NSStackView(views: [silenceThresholdField, thresholdHint])
+        thresholdRow.orientation = .horizontal
+        thresholdRow.spacing = 8
+
+        silenceSecondsField.translatesAutoresizingMaskIntoConstraints = false
+        silenceSecondsField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let secondsHint = NSTextField(frame: .zero)
+        secondsHint.isEditable = false; secondsHint.isSelectable = false
+        secondsHint.isBordered = false; secondsHint.drawsBackground = false
+        secondsHint.textColor = .secondaryLabelColor
+        secondsHint.stringValue = "seconds · default 4.0 · higher = more tolerant of pauses"
+        let secondsRow = NSStackView(views: [silenceSecondsField, secondsHint])
+        secondsRow.orientation = .horizontal
+        secondsRow.spacing = 8
+
         let lw = PreferencesWindowController.widestLabelWidth(
-            ["Input device:", "Start sound:", "Stop sound:"])
+            ["Input device:", "Start sound:", "Stop sound:",
+             "Auto-stop:", "Silence threshold:", "Silence duration:"])
         let after1 = placeRow(labelText: "Input device:", control: inputDevicePopup,
                               in: pane, topAnchor: pane.topAnchor, topConstant: 0, labelWidth: lw)
         let after2 = placeRow(labelText: "Start sound:", control: startSoundPopup,
@@ -507,7 +574,18 @@ final class PreferencesWindowController: NSWindowController,
         let after3 = placeRow(labelText: "Stop sound:", control: stopSoundPopup,
                               in: pane, topAnchor: after2,
                               topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        pane.bottomAnchor.constraint(equalTo: after3).isActive = true
+        let after4 = placeRow(labelText: "Auto-stop:", control: silenceAutoStopCheckbox,
+                              in: pane, topAnchor: after3,
+                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        let r5 = placeRowWithLabel(labelText: "Silence threshold:", control: thresholdRow,
+                                   in: pane, topAnchor: after4,
+                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        silenceThresholdLabel = r5.label
+        let r6 = placeRowWithLabel(labelText: "Silence duration:", control: secondsRow,
+                                   in: pane, topAnchor: r5.bottom,
+                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        silenceSecondsLabel = r6.label
+        pane.bottomAnchor.constraint(equalTo: r6.bottom).isActive = true
         return pane
     }
 
@@ -517,10 +595,27 @@ final class PreferencesWindowController: NSWindowController,
         let radios = NSStackView(views: [injectionPasteRadio, injectionTypedRadio])
         radios.orientation = .horizontal
         radios.spacing = 16
-        let lw = PreferencesWindowController.widestLabelWidth(["Text insertion:"])
+
+        typedDelayField.translatesAutoresizingMaskIntoConstraints = false
+        typedDelayField.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        let delayHint = NSTextField(frame: .zero)
+        delayHint.isEditable = false; delayHint.isSelectable = false
+        delayHint.isBordered = false; delayHint.drawsBackground = false
+        delayHint.textColor = .secondaryLabelColor
+        delayHint.stringValue = "ms per character · default 5 · max 100 · higher = fewer dropped keystrokes"
+        let delayRow = NSStackView(views: [typedDelayField, typedDelayStepper, delayHint])
+        delayRow.orientation = .horizontal
+        delayRow.spacing = 8
+
+        let lw = PreferencesWindowController.widestLabelWidth(
+            ["Text insertion:", "Typed delay:"])
         let after1 = placeRow(labelText: "Text insertion:", control: radios,
                               in: pane, topAnchor: pane.topAnchor, topConstant: 0, labelWidth: lw)
-        pane.bottomAnchor.constraint(equalTo: after1).isActive = true
+        let r2 = placeRowWithLabel(labelText: "Typed delay:", control: delayRow,
+                                   in: pane, topAnchor: after1,
+                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        typedDelayLabel = r2.label
+        pane.bottomAnchor.constraint(equalTo: r2.bottom).isActive = true
         return pane
     }
 
@@ -576,12 +671,16 @@ final class PreferencesWindowController: NSWindowController,
         let lw = PreferencesWindowController.widestLabelWidth(
             ["Transcription threads:", "Accuracy:", "Debug recordings:", "Logging:"])
 
-        let after1 = placeRow(labelText: "Transcription threads:", control: threadsRow,
-                              in: pane, topAnchor: pane.topAnchor, topConstant: 0,
-                              labelWidth: lw)
-        let after2 = placeRow(labelText: "Accuracy:", control: beamRow,
-                              in: pane, topAnchor: after1,
-                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        let r1 = placeRowWithLabel(labelText: "Transcription threads:", control: threadsRow,
+                                   in: pane, topAnchor: pane.topAnchor, topConstant: 0,
+                                   labelWidth: lw)
+        threadsLabel = r1.label
+        let after1 = r1.bottom
+        let r2 = placeRowWithLabel(labelText: "Accuracy:", control: beamRow,
+                                   in: pane, topAnchor: after1,
+                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        beamLabel = r2.label
+        let after2 = r2.bottom
         let after3 = placeRow(labelText: "Debug recordings:", control: debugRow,
                               in: pane, topAnchor: after2,
                               topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
@@ -654,6 +753,14 @@ final class PreferencesWindowController: NSWindowController,
         beamField.integerValue = beam
         beamStepper.integerValue = beam
         saveDebugRecordingsCheckbox.state = Preferences.shared.saveDebugRecordings ? .on : .off
+        silenceAutoStopCheckbox.state = Preferences.shared.silenceAutoStopEnabled ? .on : .off
+        silenceThresholdField.stringValue = String(format: "%.3f",
+            Preferences.shared.silenceAutoStopThreshold)
+        silenceSecondsField.stringValue = String(format: "%.1f",
+            Preferences.shared.silenceAutoStopSeconds)
+        let typedDelay = Preferences.shared.typedKeystrokeDelayMs
+        typedDelayField.integerValue = typedDelay
+        typedDelayStepper.integerValue = typedDelay
         updateConditionalRows()
     }
 
@@ -872,6 +979,16 @@ final class PreferencesWindowController: NSWindowController,
         Preferences.shared.beamSize = value
     }
 
+    @objc private func silenceAutoStopChanged() {
+        Preferences.shared.silenceAutoStopEnabled = (silenceAutoStopCheckbox.state == .on)
+    }
+
+    @objc private func typedDelayStepperChanged() {
+        let value = typedDelayStepper.integerValue
+        typedDelayField.integerValue = value
+        Preferences.shared.typedKeystrokeDelayMs = value
+    }
+
     @objc private func saveDebugRecordingsChanged() {
         Preferences.shared.saveDebugRecordings = (saveDebugRecordingsCheckbox.state == .on)
     }
@@ -1053,10 +1170,16 @@ final class PreferencesWindowController: NSWindowController,
 
     // MARK: - NSTextFieldDelegate
 
+    // Validation: mark field+label red for out-of-range, beep and revert on
+    // commit (focus loss). Only one of the five numeric fields can be the
+    // sender; the first two branches handle plain text (api key, models folder).
     func controlTextDidChange(_ obj: Notification) {
-        if (obj.object as? NSTextField) === apiKeyField {
+        guard let field = obj.object as? NSTextField else { return }
+        if field === apiKeyField {
             Preferences.shared.openAIAPIKey = apiKeyField.stringValue
-        } else if (obj.object as? NSTextField) === modelsFolderField {
+            return
+        }
+        if field === modelsFolderField {
             let text = modelsFolderField.stringValue
             if text == Preferences.userModelsDirectory.path {
                 Preferences.shared.modelsDirectory = ""
@@ -1064,16 +1187,127 @@ final class PreferencesWindowController: NSWindowController,
                 Preferences.shared.modelsDirectory = text
             }
             refreshModelPopup()
-        } else if (obj.object as? NSTextField) === threadsField {
-            let logical = ProcessInfo.processInfo.activeProcessorCount
-            let value = max(1, min(logical, threadsField.integerValue))
-            threadsStepper.integerValue = value
-            Preferences.shared.transcriptionThreads = value
-        } else if (obj.object as? NSTextField) === beamField {
-            let value = max(1, min(10, beamField.integerValue))
-            beamStepper.integerValue = value
-            Preferences.shared.beamSize = value
+            return
         }
+        validateNumericField(field)
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField else { return }
+        if field === apiKeyField || field === modelsFolderField { return }
+        if numericFieldIsValid(field) { return }
+        NSSound.beep()
+        revertNumericFieldToPref(field)
+    }
+
+    private func validateNumericField(_ field: NSTextField) {
+        switch field {
+        case threadsField:
+            let logical = ProcessInfo.processInfo.activeProcessorCount
+            if let v = Int(threadsField.stringValue), v >= 1, v <= logical {
+                threadsStepper.integerValue = v
+                Preferences.shared.transcriptionThreads = v
+                setNumericFieldValid(field: threadsField, label: threadsLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: threadsField, label: threadsLabel, valid: false)
+            }
+        case beamField:
+            if let v = Int(beamField.stringValue), v >= 1, v <= 10 {
+                beamStepper.integerValue = v
+                Preferences.shared.beamSize = v
+                setNumericFieldValid(field: beamField, label: beamLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: beamField, label: beamLabel, valid: false)
+            }
+        case typedDelayField:
+            if let v = Int(typedDelayField.stringValue), v >= 5, v <= 100 {
+                typedDelayStepper.integerValue = v
+                Preferences.shared.typedKeystrokeDelayMs = v
+                setNumericFieldValid(field: typedDelayField, label: typedDelayLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: typedDelayField, label: typedDelayLabel, valid: false)
+            }
+        case silenceThresholdField:
+            if let v = Double(silenceThresholdField.stringValue), v >= 0.01 {
+                Preferences.shared.silenceAutoStopThreshold = v
+                setNumericFieldValid(field: silenceThresholdField,
+                                     label: silenceThresholdLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: silenceThresholdField,
+                                     label: silenceThresholdLabel, valid: false)
+            }
+        case silenceSecondsField:
+            if let v = Double(silenceSecondsField.stringValue), v >= 1.2 {
+                Preferences.shared.silenceAutoStopSeconds = v
+                setNumericFieldValid(field: silenceSecondsField,
+                                     label: silenceSecondsLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: silenceSecondsField,
+                                     label: silenceSecondsLabel, valid: false)
+            }
+        default:
+            break
+        }
+    }
+
+    private func numericFieldIsValid(_ field: NSTextField) -> Bool {
+        switch field {
+        case threadsField:
+            let logical = ProcessInfo.processInfo.activeProcessorCount
+            guard let v = Int(threadsField.stringValue) else { return false }
+            return v >= 1 && v <= logical
+        case beamField:
+            guard let v = Int(beamField.stringValue) else { return false }
+            return v >= 1 && v <= 10
+        case typedDelayField:
+            guard let v = Int(typedDelayField.stringValue) else { return false }
+            return v >= 5 && v <= 100
+        case silenceThresholdField:
+            guard let v = Double(silenceThresholdField.stringValue) else { return false }
+            return v >= 0.01
+        case silenceSecondsField:
+            guard let v = Double(silenceSecondsField.stringValue) else { return false }
+            return v >= 1.2
+        default:
+            return true
+        }
+    }
+
+    private func revertNumericFieldToPref(_ field: NSTextField) {
+        switch field {
+        case threadsField:
+            let v = Preferences.shared.transcriptionThreads
+            threadsField.integerValue = v
+            threadsStepper.integerValue = v
+            setNumericFieldValid(field: threadsField, label: threadsLabel, valid: true)
+        case beamField:
+            let v = Preferences.shared.beamSize
+            beamField.integerValue = v
+            beamStepper.integerValue = v
+            setNumericFieldValid(field: beamField, label: beamLabel, valid: true)
+        case typedDelayField:
+            let v = Preferences.shared.typedKeystrokeDelayMs
+            typedDelayField.integerValue = v
+            typedDelayStepper.integerValue = v
+            setNumericFieldValid(field: typedDelayField, label: typedDelayLabel, valid: true)
+        case silenceThresholdField:
+            silenceThresholdField.stringValue = String(format: "%.3f",
+                Preferences.shared.silenceAutoStopThreshold)
+            setNumericFieldValid(field: silenceThresholdField,
+                                 label: silenceThresholdLabel, valid: true)
+        case silenceSecondsField:
+            silenceSecondsField.stringValue = String(format: "%.1f",
+                Preferences.shared.silenceAutoStopSeconds)
+            setNumericFieldValid(field: silenceSecondsField,
+                                 label: silenceSecondsLabel, valid: true)
+        default:
+            break
+        }
+    }
+
+    private func setNumericFieldValid(field: NSTextField, label: NSTextField?, valid: Bool) {
+        field.textColor = valid ? NSColor.textColor : NSColor.systemRed
+        label?.textColor = valid ? NSColor.labelColor : NSColor.systemRed
     }
 
     // MARK: - Hotkey recording

@@ -7,6 +7,11 @@ final class TextInjector {
     // against our restored contents; too long and the user sees a visible gap.
     private static let pasteboardRestoreDelay: TimeInterval = 0.2
 
+    // Pacing between synthesized keystrokes. Posting CGEvents at full Swift
+    // loop speed overflows the HID event dispatch backlog on long strings,
+    // causing silent event drops. Value is read from preferences in ms and
+    // converted to microseconds for usleep.
+
     func insert(_ text: String) {
         guard !text.isEmpty else { return }
         let method = Preferences.shared.injectionMethod
@@ -34,6 +39,7 @@ final class TextInjector {
 
     private func typedInsert(_ text: String) {
         let source = CGEventSource(stateID: .combinedSessionState)
+        let delayUs = UInt32(max(0, Preferences.shared.typedKeystrokeDelayMs)) * 1_000
         for scalar in text.unicodeScalars {
             let chars = Array(String(scalar).utf16)
             if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true) {
@@ -44,6 +50,7 @@ final class TextInjector {
                 keyUp.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: chars)
                 keyUp.post(tap: .cghidEventTap)
             }
+            if delayUs > 0 { usleep(delayUs) }
         }
     }
 

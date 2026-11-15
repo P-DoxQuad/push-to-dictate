@@ -294,6 +294,7 @@ final class StatusItemController: NSObject,
                 showError(title: "Cannot start dictation", detail: issue)
                 return
             }
+            configureAutoStop()
             do {
                 try audioRecorder.start()
             } catch {
@@ -321,6 +322,22 @@ final class StatusItemController: NSObject,
         // When stopping, transcribe() takes over icon state (.processing then
         // .idle on success or .error on failure). Don't overwrite it here.
         toggleMenuItem.title = isRecording ? "Stop Dictation" : "Start Dictation"
+    }
+
+    private func configureAutoStop() {
+        let prefs = Preferences.shared
+        let eligible = hotkeyMonitor.mode == .toggle && prefs.silenceAutoStopEnabled
+        if eligible {
+            audioRecorder.autoStopThreshold = Float(prefs.silenceAutoStopThreshold)
+            audioRecorder.autoStopDuration = prefs.silenceAutoStopSeconds
+            audioRecorder.onAutoStopTriggered = { [weak self] in
+                self?.setRecording(false)
+            }
+        } else {
+            audioRecorder.autoStopThreshold = nil
+            audioRecorder.autoStopDuration = nil
+            audioRecorder.onAutoStopTriggered = nil
+        }
     }
 
     private func preflightBackend() -> String? {

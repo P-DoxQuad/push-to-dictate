@@ -722,3 +722,47 @@ Also in this pass:
 - Preferences → Transcription pane rewrapped in a vertical `NSStackView` of `buildRowView`-produced row containers so hiding `transcriptionModelRow`/`transcriptionModelsFolderRow`/`transcriptionApiKeyRow` when the backend switches to OpenAI collapses the row *and* its inter-row spacing. Previously the API-key row sat where the folder row had been, leaving a visible gap.
 - `README.md` picked up a "Menu bar menu" section describing the status-item menu items, including the new Help entry.
 - Welcome / hover popover body text updated to point users at Help: "Press <hotkey> to start dictation. Click the icon for Help and more options." The `<hotkey>` placeholder resolves to the user's current binding via `PreferencesWindowController.describe(...)`.
+
+### 2026-11-15 — v1.1 development: auto-stop, injection pacing, transcriber deadlock, validation
+
+#### Silence auto-stop (Toggle mode)
+
+New feature. `AudioRecorder` exposes `autoStopThreshold: Float?`, `autoStopDuration: TimeInterval?`, and `onAutoStopTriggered: (() -> Void)?`. The input-tap callback tracks a `silentSince: Date?` while audio stays below threshold; when the gap reaches the configured duration, the triggered callback fires once (guarded by `autoStopFired`) on the main queue. `StatusItemController.configureAutoStop()` arms these properties only when `hotkeyMode == .toggle` AND the user preference is on, otherwise clears them. Trigger closure calls `setRecording(false)` so the normal stop-sound → transcribe → inject pipeline runs.
+
+Three new preferences: `silenceAutoStopEnabled` (default true), `silenceAutoStopThreshold` (default 0.01 RMS), `silenceAutoStopSeconds` (default 4.0). All three included in `allUserDefaultsKeys` for backup/restore.
+
+#### WhisperCppTranscriber pipe-buffer deadlock
+
+Latent bug: `runWhisperCli` drained `stdoutPipe` and `stderrPipe` only after `waitUntilExit()`. For short audio, the combined output fit in the ~16-64 KB pipe buffer and the call returned fine. For long audio (benchmark paragraph tests), whisper-cli's verbose stderr progress output filled the pipe, blocked on write, and `waitUntilExit()` hung; eventually the process yielded a truncated stdout capture (only the first few tokens landed). Fix: install `readabilityHandler` closures on both pipes before `launch()` to drain concurrently with an `NSLock`-guarded `Data` accumulator. After `waitUntilExit()`, nil out the handlers and read any residual `availableData` to flush. Error-path stderr snippet behavior preserved.
+
+#### TextInjector keystroke pacing
+
+For the `.typed` injection method (CGEvent-based per-character injection), long strings overflowed the HID event dispatch backlog and characters were silently dropped. The transcription log showed the full text but only a fraction of characters landed in the focused app. Added a configurable per-character delay via `usleep`, defaulting to 5 ms (200 chars/sec). New preference `typedKeystrokeDelayMs` (floor 5, ceiling 100), surfaced in Preferences → Output.
+
+#### Numeric field validation (five fields across three panes)
+
+Replaced silent clamping with explicit error indication. Five bounded numeric fields now:
+
+- `transcriptionThreads`: 1 to `ProcessInfo.processInfo.activeProcessorCount`
+- `beamSize`: 1 to 10
+- `typedKeystrokeDelayMs`: 5 to 100
+- `silenceAutoStopThreshold`: ≥ 0.01, no ceiling
+- `silenceAutoStopSeconds`: ≥ 1.2, no ceiling
+
+Behavior: on each keystroke, `validateNumericField` parses the typed value. In range, stepper and preference update and the field+label stay default color. Out of range, field text and row label switch to `NSColor.systemRed` and the preference is not written. On field commit (focus loss), `controlTextDidEndEditing` plays `NSSound.beep()` and reverts the field to the last persisted preference value if still invalid.
+
+Required capturing the row labels during layout. New `placeRowWithLabel` helper returns `(bottom: NSLayoutYAxisAnchor, label: NSTextField)`; five rows use it and stash the label in instance properties (`threadsLabel`, `beamLabel`, `typedDelayLabel`, `silenceThresholdLabel`, `silenceSecondsLabel`). Existing `placeRow` is now a thin wrapper that discards the label.
+
+#### Pane reorganization
+
+Silence auto-stop controls moved from Advanced to Audio: they govern recording behavior, not transcription engine configuration. Audio pane now has six rows (Input device, Start sound, Stop sound, Auto-stop, Silence threshold, Silence duration); Advanced is back to its previous four (Transcription threads, Accuracy, Debug recordings, Logging).
+
+#### UI copy guidance in `CLAUDE.md`
+
+New `## UI copy` section codifying industry-standard microcopy practice (Nielsen Norman, Apple HIG, Material Design). Declarative advice is explicitly permitted ("Recommended for X", "Higher = more X"); second-person addressing is forbidden ("you", "your", "if you want"). Covers tone, content, form, and error-state handling.
+
+Three hints adopt the pattern:
+
+- Silence threshold: `RMS level · default 0.01 · lower = more sensitive`
+- Silence duration: `seconds · default 4.0 · higher = more tolerant of pauses`
+- Typed delay: `ms per character · default 5 · max 100 · higher = fewer dropped keystrokes`

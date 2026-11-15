@@ -33,6 +33,10 @@ final class Preferences {
         static let saveDebugRecordings = "saveDebugRecordings"
         static let didAutoSelectModel = "didAutoSelectModel"
         static let didShowWelcomeTooltip = "didShowWelcomeTooltip"
+        static let silenceAutoStopEnabled = "silenceAutoStopEnabled"
+        static let silenceAutoStopThreshold = "silenceAutoStopThreshold"
+        static let silenceAutoStopSeconds = "silenceAutoStopSeconds"
+        static let typedKeystrokeDelayMs = "typedKeystrokeDelayMs"
     }
 
     static let noSoundName = "None"
@@ -146,6 +150,38 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.didShowWelcomeTooltip) }
     }
 
+    var silenceAutoStopEnabled: Bool {
+        get {
+            if defaults.object(forKey: Key.silenceAutoStopEnabled) == nil { return true }
+            return defaults.bool(forKey: Key.silenceAutoStopEnabled)
+        }
+        set { defaults.set(newValue, forKey: Key.silenceAutoStopEnabled) }
+    }
+
+    var silenceAutoStopThreshold: Double {
+        get {
+            let stored = defaults.double(forKey: Key.silenceAutoStopThreshold)
+            return stored == 0 ? 0.01 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.silenceAutoStopThreshold) }
+    }
+
+    var silenceAutoStopSeconds: Double {
+        get {
+            let stored = defaults.double(forKey: Key.silenceAutoStopSeconds)
+            return stored == 0 ? 4.0 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.silenceAutoStopSeconds) }
+    }
+
+    var typedKeystrokeDelayMs: Int {
+        get {
+            let stored = defaults.integer(forKey: Key.typedKeystrokeDelayMs)
+            return stored == 0 ? 5 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.typedKeystrokeDelayMs) }
+    }
+
     static var debugRecordingsDirectory: URL {
         return defaultSupportDirectory.appendingPathComponent("debug", isDirectory: true)
     }
@@ -249,7 +285,9 @@ final class Preferences {
         Key.suppressedMoveToApplicationsPrompt,
         Key.transcriptionThreads, Key.beamSize,
         Key.saveDebugRecordings, Key.didAutoSelectModel,
-        Key.didShowWelcomeTooltip
+        Key.didShowWelcomeTooltip,
+        Key.silenceAutoStopEnabled, Key.silenceAutoStopThreshold,
+        Key.silenceAutoStopSeconds, Key.typedKeystrokeDelayMs
     ]
 
     // MARK: - Keychain
