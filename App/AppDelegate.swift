@@ -5,8 +5,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         maybeAutoSelectModel()
-        statusController = StatusItemController()
         maybePromptMoveToApplications()
+        statusController = StatusItemController()
     }
 
     private func maybeAutoSelectModel() {
@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Move Push to Dictate to the Applications folder?"
         alert.informativeText = "Push to Dictate works best when installed in /Applications/. " +

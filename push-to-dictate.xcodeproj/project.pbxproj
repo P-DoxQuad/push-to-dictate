@@ -21,6 +21,7 @@
 		136EDB9630A8D82C00B3EC5B /* AboutWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136EDB9530A8D82C00B3EC5B /* AboutWindowController.swift */; };
 		A1B2C3D430B00001000000AA /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D130B00001000000AA /* UpdateChecker.swift */; };
 		A1B2C3D530B00001000000AA /* UpdateCheckWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D230B00001000000AA /* UpdateCheckWindowController.swift */; };
+		A1B2C3D730B00002000000AA /* AccessibilityRequestWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D630B00002000000AA /* AccessibilityRequestWindowController.swift */; };
 		136EDBAB30A8F57200B3EC5B /* Push_to_Dictate_Keycap_Color_1024.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDBA730A8F57200B3EC5B /* Push_to_Dictate_Keycap_Color_1024.png */; };
 		136EDBAC30A8F57200B3EC5B /* Push_to_Dictate_Keycap_Color_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDBA830A8F57200B3EC5B /* Push_to_Dictate_Keycap_Color_44.png */; };
 		136EDBAD30A8F57200B3EC5B /* Push_to_Dictate_Keycap_White_44.png in CopyFiles */ = {isa = PBXBuildFile; fileRef = 136EDBA930A8F57200B3EC5B /* Push_to_Dictate_Keycap_White_44.png */; };
@@ -75,6 +76,7 @@
 		136EDB9530A8D82C00B3EC5B /* AboutWindowController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AboutWindowController.swift; sourceTree = "<group>"; };
 		A1B2C3D130B00001000000AA /* UpdateChecker.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		A1B2C3D230B00001000000AA /* UpdateCheckWindowController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UpdateCheckWindowController.swift; sourceTree = "<group>"; };
+		A1B2C3D630B00002000000AA /* AccessibilityRequestWindowController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AccessibilityRequestWindowController.swift; sourceTree = "<group>"; };
 		136EDBA730A8F57200B3EC5B /* Push_to_Dictate_Keycap_Color_1024.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Keycap_Color_1024.png; path = icons/Push_to_Dictate_Keycap_Color_1024.png; sourceTree = "<group>"; };
 		136EDBA830A8F57200B3EC5B /* Push_to_Dictate_Keycap_Color_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Keycap_Color_44.png; path = icons/Push_to_Dictate_Keycap_Color_44.png; sourceTree = "<group>"; };
 		136EDBA930A8F57200B3EC5B /* Push_to_Dictate_Keycap_White_44.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Push_to_Dictate_Keycap_White_44.png; path = icons/Push_to_Dictate_Keycap_White_44.png; sourceTree = "<group>"; };
@@ -140,6 +142,7 @@
 				136EDBC230A9286800B3EC5B /* HelpWindowController.swift */,
 				136EDB9530A8D82C00B3EC5B /* AboutWindowController.swift */,
 				A1B2C3D230B00001000000AA /* UpdateCheckWindowController.swift */,
+				A1B2C3D630B00002000000AA /* AccessibilityRequestWindowController.swift */,
 				136EDB6930A5757B00B3EC5B /* main.swift */,
 				13743FD930A2D8EB00FAC440 /* AppDelegate.swift */,
 				13743FDA30A2D8EB00FAC440 /* Info.plist */,
@@ -272,6 +275,7 @@
 				136EDB9630A8D82C00B3EC5B /* AboutWindowController.swift in Sources */,
 				A1B2C3D430B00001000000AA /* UpdateChecker.swift in Sources */,
 				A1B2C3D530B00001000000AA /* UpdateCheckWindowController.swift in Sources */,
+				A1B2C3D730B00002000000AA /* AccessibilityRequestWindowController.swift in Sources */,
 				13743FEB30A2D8EB00FAC440 /* Transcriber.swift in Sources */,
 				136EDBC330A9286800B3EC5B /* HelpWindowController.swift in Sources */,
 				136EDB9030A8C93F00B3EC5B /* ModelCatalog.swift in Sources */,

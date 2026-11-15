@@ -794,3 +794,33 @@ New Info.plist key `PQDisplayVersion` holds the SemVer label (currently `1.1`) s
 - SemVer is just a label; nothing compares against it. Bumps once per development cycle (1.1 after shipping 1.0, 1.2 after shipping 1.1, etc.).
 
 `CLAUDE.md` release procedure updated to list both keys to confirm when cutting, and to require bumping both on `main` immediately after a release goes out.
+
+### 2026-11-15 — First-launch flow: Move-first, non-modal Accessibility, auto-restart
+
+#### Prompt order reversal
+
+Prior: `AppDelegate.applicationDidFinishLaunching` installed the status controller (which blocked on an `NSAlert` for Accessibility) before offering Move-to-Applications. For an unsigned / ad-hoc-signed build, the Accessibility database records permission against the binary's path on disk. Granting at the Downloads path and *then* moving the bundle invalidated the grant, since the relocated binary isn't the one the user whitelisted.
+
+Fix: run `maybePromptMoveToApplications` before constructing `StatusItemController`. If the user accepts the move, the app relaunches from `/Applications/` and the Accessibility prompt subsequently runs against the final-path binary. If the user declines or skips, status controller comes up and Accessibility is requested from the original location. Added `NSApp.activate(ignoringOtherApps: true)` before the Move alert so it foregrounds reliably from an `LSUIElement` process with no window on screen yet.
+
+#### Non-modal Accessibility request window with live polling
+
+New `App/AccessibilityRequestWindowController.swift`. Replaces the blocking `NSAlert` with a non-modal window that:
+
+1. States the Accessibility requirement in plain copy.
+2. Offers an "Open Accessibility Preferences" button that fires the standard `x-apple.systempreferences:` deep link to the Privacy pane.
+3. Polls `AXIsProcessTrusted()` on a 1-second repeating `Timer` while shown.
+4. On trust flip to true: stops polling, invokes an `onTrustGranted` closure provided by `StatusItemController` that re-runs `hotkeyMonitor.start()`.
+5. Inspects `HotkeyMonitor.isActive` (new public property backed by `eventTap != nil`):
+   - If true (in-place tap re-init succeeded): swaps window content to "You're all set." with a Done button. No restart needed.
+   - If false (`CGEvent.tapCreate` still returning nil despite live-true trust — a known macOS quirk where trust denial is cached per-process below the AX API): swaps content to "Accessibility access granted / Restarting Push to Dictate to finish applying the permission…", hides buttons, and auto-restarts after 1.8 seconds via the same `sh -c "sleep 1; open '<bundle path>'"` + `NSApp.terminate(nil)` pattern `AppDelegate.performMoveToApplications` uses. No user action required.
+
+Window retains itself via `static private(set) var active: AccessibilityRequestWindowController?` so the URLSession-style "local reference falls out of scope and controller dies" bug caught during the update-checker smoke test can't happen here either.
+
+#### Attention-grabbing menu item for skipped Accessibility
+
+New hidden-by-default menu item "Grant Accessibility Access…" with an `attributedTitle` in bold `NSColor.systemRed`. Visible only when `AXIsProcessTrusted() == false` AND `AccessibilityRequestWindowController.active == nil` (i.e. user dismissed the window without granting). `StatusItemController` conforms to `NSMenuDelegate` and implements `menuNeedsUpdate(_:)` to re-evaluate visibility just before the menu opens, so the item accurately reflects live permission state without polling. Clicking the item re-presents the Accessibility window; its dismiss / grant callbacks re-run the visibility check.
+
+#### Welcome popover comment refresh
+
+The 1.2-second deferred show had a comment saying it was timed to avoid overlap with blocking launch-time alerts. With all launch prompts now non-modal or reordered, the delay is only still needed for status-item button layout. Comment updated to reflect this.

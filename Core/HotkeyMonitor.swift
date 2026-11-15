@@ -56,6 +56,8 @@ final class HotkeyMonitor {
         return AXIsProcessTrusted()
     }
 
+    var isActive: Bool { return eventTap != nil }
+
     private func handle(type: CGEventType, event: CGEvent) -> Bool {
         let flags = event.flags.intersection(HotkeyMonitor.modifierMask)
         let keycode = Int(event.getIntegerValueField(.keyboardEventKeycode))

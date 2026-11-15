@@ -2,7 +2,8 @@ import Cocoa
 import UserNotifications
 
 final class StatusItemController: NSObject,
-                                  NSUserNotificationCenterDelegate {
+                                  NSUserNotificationCenterDelegate,
+                                  NSMenuDelegate {
 
     // Peak RMS below this across the whole recording = treat as silence,
     // skip transcription. Normal speech sits around 0.05–0.3; room noise
@@ -13,6 +14,7 @@ final class StatusItemController: NSObject,
     private var toggleMenuItem: NSMenuItem!
     private var toggleModeItem: NSMenuItem!
     private var pushToTalkModeItem: NSMenuItem!
+    private var accessibilityRequestItem: NSMenuItem!
     private var isRecording = false
 
     private let hotkeyMonitor = HotkeyMonitor()
@@ -36,7 +38,9 @@ final class StatusItemController: NSObject,
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         configureButton()
-        statusItem.menu = buildMenu()
+        let menu = buildMenu()
+        menu.delegate = self
+        statusItem.menu = menu
         configureHotkey()
         configureAudio()
         observeAppearanceChanges()
@@ -249,6 +253,20 @@ final class StatusItemController: NSObject,
         menu.addItem(about)
 
         menu.addItem(NSMenuItem.separator())
+
+        let attention = NSMutableAttributedString(string: "Grant Accessibility Access…")
+        attention.addAttributes(
+            [.foregroundColor: NSColor.systemRed,
+             .font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)],
+            range: NSRange(location: 0, length: attention.length)
+        )
+        accessibilityRequestItem = NSMenuItem(title: "Grant Accessibility Access…",
+                                              action: #selector(openAccessibilityRequest),
+                                              keyEquivalent: "")
+        accessibilityRequestItem.attributedTitle = attention
+        accessibilityRequestItem.target = self
+        accessibilityRequestItem.isHidden = true
+        menu.addItem(accessibilityRequestItem)
 
         let updates = NSMenuItem(title: "Check for Updates…",
                                  action: #selector(checkForUpdates),
@@ -472,27 +490,26 @@ final class StatusItemController: NSObject,
 
     private func promptForAccessibilityIfNeeded() {
         if HotkeyMonitor.hasAccessibilityPermission() { return }
+        showAccessibilityRequestWindow()
+    }
 
-        let alert = NSAlert()
-        alert.messageText = "Accessibility permission required"
-        alert.informativeText =
-            "Push to Dictate needs Accessibility access to listen for its global hotkey " +
-            "and to insert transcribed text into other apps.\n\n" +
-            "Open System Preferences → Security & Privacy → Privacy → Accessibility and " +
-            "add Push to Dictate, then relaunch the app."
-        alert.addButton(withTitle: "Open Accessibility Preferences")
-        alert.addButton(withTitle: "Later")
-        if alert.runModal() == .alertFirstButtonReturn {
-            let url = URL(string:
-                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-            NSWorkspace.shared.open(url)
-        }
+    private func showAccessibilityRequestWindow() {
+        AccessibilityRequestWindowController.present(
+            onTrustGranted: { [weak self] in
+                guard let self = self else { return false }
+                self.hotkeyMonitor.start()
+                return self.hotkeyMonitor.isActive
+            },
+            onMenuShouldRefresh: { [weak self] in
+                self?.refreshAccessibilityMenuItem()
+            }
+        )
     }
 
     private func maybeShowWelcomePopover() {
         if Preferences.shared.didShowWelcomeTooltip { return }
-        // Delay so any launch-time alerts (Accessibility, Move to Applications)
-        // have a chance to come and go before the popover tries to anchor.
+        // Delay so the status-item button is fully placed before the popover
+        // tries to anchor to it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             guard let self = self else { return }
             self.showInfoPopover(autoDismissAfter: 12)
@@ -662,6 +679,21 @@ final class StatusItemController: NSObject,
 
     @objc private func checkForUpdates() {
         UpdateCheckWindowController.present()
+    }
+
+    @objc private func openAccessibilityRequest() {
+        showAccessibilityRequestWindow()
+    }
+
+    private func refreshAccessibilityMenuItem() {
+        let needsAttention =
+            !HotkeyMonitor.hasAccessibilityPermission() &&
+            AccessibilityRequestWindowController.active == nil
+        accessibilityRequestItem.isHidden = !needsAttention
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        refreshAccessibilityMenuItem()
     }
 
     private func syncModeMenuState() {
