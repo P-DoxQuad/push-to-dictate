@@ -25,7 +25,7 @@ final class AboutWindowController: NSWindowController {
         guard let content = window?.contentView else { return }
 
         let info = Bundle.main.infoDictionary
-        let version = (info?["CFBundleShortVersionString"] as? String) ?? "1.0"
+        let version = (info?["CFBundleShortVersionString"] as? String) ?? "2026.11.0"
         let appIcon = NSApp.applicationIconImage ?? NSImage(named: "push-to-dictate")
             ?? NSImage(size: NSSize(width: 128, height: 128))
 
