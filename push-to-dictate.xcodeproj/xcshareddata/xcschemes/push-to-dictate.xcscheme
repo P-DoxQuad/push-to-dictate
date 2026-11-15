@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "13743FAA30A2D38700FAC440"
-               BuildableName = "push-to-dictate.app"
+               BuildableName = "Push to Dictate.app"
                BlueprintName = "push-to-dictate"
                ReferencedContainer = "container:push-to-dictate.xcodeproj">
             </BuildableReference>
@@ -33,7 +33,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13743FAA30A2D38700FAC440"
-            BuildableName = "push-to-dictate.app"
+            BuildableName = "Push to Dictate.app"
             BlueprintName = "push-to-dictate"
             ReferencedContainer = "container:push-to-dictate.xcodeproj">
          </BuildableReference>
@@ -56,7 +56,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13743FAA30A2D38700FAC440"
-            BuildableName = "push-to-dictate.app"
+            BuildableName = "Push to Dictate.app"
             BlueprintName = "push-to-dictate"
             ReferencedContainer = "container:push-to-dictate.xcodeproj">
          </BuildableReference>
@@ -75,7 +75,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13743FAA30A2D38700FAC440"
-            BuildableName = "push-to-dictate.app"
+            BuildableName = "Push to Dictate.app"
             BlueprintName = "push-to-dictate"
             ReferencedContainer = "container:push-to-dictate.xcodeproj">
          </BuildableReference>

@@ -401,8 +401,9 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				EXECUTABLE_NAME = "push-to-dictate";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.paradoxicalquad.push-to-dictate";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Push to Dictate";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 4.2;
 			};
@@ -421,8 +422,9 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				EXECUTABLE_NAME = "push-to-dictate";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.paradoxicalquad.push-to-dictate";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Push to Dictate";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 4.2;
 			};
