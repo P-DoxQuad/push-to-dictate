@@ -38,7 +38,9 @@ final class AudioRecorder {
 
         guard let conv = AVAudioConverter(from: inputFormat, to: outFormat) else {
             throw NSError(domain: "AudioRecorder", code: 2,
-                          userInfo: [NSLocalizedDescriptionKey: "Could not create converter"])
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "Could not create converter (input sampleRate=\(inputFormat.sampleRate), " +
+                            "channels=\(inputFormat.channelCount), commonFormat=\(inputFormat.commonFormat.rawValue))"])
         }
         converter = conv
 
