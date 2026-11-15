@@ -6,7 +6,7 @@ Runs on CPU. No GPU, Neural Engine, or network connection is used by the local b
 
 ## Version
 
-2026.11.0 (CalVer: `YYYY.MM.PATCH`).
+2026.11.1 (CalVer: `YYYY.MM.PATCH`).
 
 ## Supported platforms
 
