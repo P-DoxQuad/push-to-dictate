@@ -84,7 +84,7 @@ Branching model:
 
 - `main`: active development. Always ahead of the latest shipped version.
 - `release/vN.M`: frozen at a shipped version's state. One per shipped `MAJOR.MINOR`. Only touched for backports.
-- Tags: immutable once external consumers have depended on them. Same-day force-moves are allowed to correct an objectively wrong tagged commit (stale docs, bad metadata, wrong SHA) before third parties have pulled it. One per shipped release, named with the CalVer version prefixed with `v`.
+- Tags: immutable once external consumers have depended on them. Same-day force-moves are allowed to correct an objectively wrong tagged commit (stale docs, bad metadata, wrong SHA) before third parties have pulled it. One per shipped release, named with the CalVer version prefixed with `v` and no suffix (e.g. `v2026.11.1`). The `-Full` suffix is reserved for asset filenames only; never append it to tag names. When creating a release on GitHub, type the plain `v<CalVer>` into the Tag field so GitHub does not mint a new suffixed tag.
 
 Release cutting:
 
@@ -93,7 +93,7 @@ Release cutting:
 - Tag the release commit with the CalVer version prefixed with `v`.
 - Branch `release/vN.M` from that tag.
 - Push the tag and the branch to `origin`.
-- Build the Release archive from the tagged commit, zip as `Push-to-Dictate-v<CalVer>-Full.zip`, attach to a new GitHub release on the tag.
+- Build the Release archive from the tagged commit, zip as `Push-to-Dictate-v<CalVer>-Full.zip` (asset filename carries `-Full` to mark it as the complete bundle, reserving naming space for possible partial-asset variants like `-Patch`), attach to the existing `v<CalVer>` tag's new GitHub release.
 - On `main`, immediately bump `CFBundleShortVersionString` to the next anticipated CalVer and `PQDisplayVersion` to the next SemVer so in-development builds identify as newer than the shipped release.
 
 Backport flow:
