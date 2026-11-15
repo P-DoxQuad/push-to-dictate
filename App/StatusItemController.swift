@@ -250,6 +250,14 @@ final class StatusItemController: NSObject,
 
         menu.addItem(NSMenuItem.separator())
 
+        let updates = NSMenuItem(title: "Check for Updates…",
+                                 action: #selector(checkForUpdates),
+                                 keyEquivalent: "")
+        updates.target = self
+        menu.addItem(updates)
+
+        menu.addItem(NSMenuItem.separator())
+
         let quit = NSMenuItem(title: "Quit",
                               action: #selector(NSApplication.terminate(_:)),
                               keyEquivalent: "q")
@@ -650,6 +658,10 @@ final class StatusItemController: NSObject,
 
     @objc private func openHelp() {
         HelpWindowController.shared.show()
+    }
+
+    @objc private func checkForUpdates() {
+        UpdateCheckWindowController.present()
     }
 
     private func syncModeMenuState() {

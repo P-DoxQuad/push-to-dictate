@@ -77,8 +77,8 @@ Applies to all user-facing strings: labels, hints, placeholders, button titles, 
 
 Dual versioning:
 
-- Public (shipped, git tags, release assets): CalVer `YYYY.MM.PATCH`. Year.Month.PatchWithinMonth. First release of the month uses `PATCH = 0`; subsequent same-month releases increment. New month resets `PATCH` to `0`. Same-version bugfix respin appends a fourth digit: `YYYY.MM.PATCH.N`.
-- Internal (mental model, local folder names, branch names): SemVer-style `MAJOR.MINOR[.PATCH]`. `MAJOR` on rewrites or breaking changes. `MINOR` on new features. `PATCH` on bugfixes with no new features.
+- Public (shipped, git tags, release assets, `CFBundleShortVersionString`, update checker compare): CalVer `YYYY.MM.PATCH`. Year.Month.PatchWithinMonth. First release of the month uses `PATCH = 0`; subsequent same-month releases increment. New month resets `PATCH` to `0`. Same-version bugfix respin appends a fourth digit: `YYYY.MM.PATCH.N`. On `main`, this version always reflects "newer than the last shipped release", so it bumps immediately after cutting a release, not when the next one cuts.
+- Internal (mental model, local folder names, branch names, user-facing About window via `PQDisplayVersion` Info.plist key): SemVer-style `MAJOR.MINOR[.PATCH]`. `MAJOR` on rewrites or breaking changes. `MINOR` on new features. `PATCH` on bugfixes with no new features.
 
 Branching model:
 
@@ -88,17 +88,18 @@ Branching model:
 
 Release cutting:
 
-- Update `CFBundleShortVersionString` in `App/Info.plist` to the new CalVer value.
+- Confirm `CFBundleShortVersionString` and `PQDisplayVersion` in `App/Info.plist` match the release being cut (CalVer and SemVer respectively).
 - Tag the release commit with the CalVer version prefixed with `v`.
 - Branch `release/vN.M` from that tag.
 - Push the tag and the branch to `origin`.
 - Build the Release archive from the tagged commit, zip as `Push-to-Dictate-v<CalVer>-Full.zip`, attach to a new GitHub release on the tag.
+- On `main`, immediately bump `CFBundleShortVersionString` to the next anticipated CalVer and `PQDisplayVersion` to the next SemVer so in-development builds identify as newer than the shipped release.
 
 Backport flow:
 
 - Check out the relevant `release/vN.M` branch.
 - Commit the fix on that branch.
-- Bump `CFBundleShortVersionString` to a four-digit CalVer (`YYYY.MM.PATCH.N`).
+- Bump `CFBundleShortVersionString` to a four-digit CalVer (`YYYY.MM.PATCH.N`). Bump `PQDisplayVersion` to a SemVer patch (`N.M.P`).
 - Tag the branch commit with the same four-digit CalVer prefixed with `v`.
 - Build and attach a new release asset.
 - Cherry-pick the fix into `main` when applicable.

@@ -766,3 +766,31 @@ Three hints adopt the pattern:
 - Silence threshold: `RMS level · default 0.01 · lower = more sensitive`
 - Silence duration: `seconds · default 4.0 · higher = more tolerant of pauses`
 - Typed delay: `ms per character · default 5 · max 100 · higher = fewer dropped keystrokes`
+
+### 2026-11-15 — Update checker and SemVer display version
+
+#### Manual update check against GitHub Releases
+
+New feature. "Check for Updates…" menu item in the status menu, and a matching button in the About window. Both call `UpdateCheckWindowController.present()` which shows a non-modal window with a spinner and status label, kicks off a GitHub API call, and renders the result in-place.
+
+`Core/UpdateChecker.swift` hits `https://api.github.com/repos/P-DoxQuad/push-to-dictate/releases/latest` with a 10 second timeout, parses `tag_name` and `html_url` from the JSON via `JSONSerialization` (10.11 safe, no `Codable`). Compares the fetched tag (stripped of leading `v`) against the installed `CFBundleShortVersionString` using a component-wise integer compare that pads the shorter dot-sequence with zeros so `2026.11.0.1` sorts correctly against `2026.11.0`. Lexicographic string compare would have put `2026.11.10 < 2026.11.2`, which is wrong.
+
+`App/UpdateCheckWindowController.swift` holds a `private static var active` strong reference for the duration of the check. Without this the local controller in `present()` falls out of scope the instant the function returns, the network completion's `self?.render` evaluates to nil, and the spinner spins forever. First smoke test caught this.
+
+Three terminal states, swapped into the same window:
+- Up to date: "Up to date." + "Installed version: X" + OK
+- Update available: "Update available: Y" + "Installed version: X" + Open Releases Page / Later
+- Error: "Couldn't check for updates." + reason + OK
+
+"Open Releases Page" uses `NSWorkspace.shared.open` on the release's `html_url` (e.g. `https://github.com/P-DoxQuad/push-to-dictate/releases/tag/v2026.11.0`). No download, no install, no appcast, no background polling. Entirely user-initiated.
+
+#### Dual version display
+
+Prior state: `CFBundleShortVersionString` was shown in the About window and compared by the update checker. Both uses are now split.
+
+New Info.plist key `PQDisplayVersion` holds the SemVer label (currently `1.1`) shown as "Version X" in the About window. `CFBundleShortVersionString` holds CalVer (`2026.11.1`) and is read only by the update checker to compare against GitHub tags. The two advance on different cadences:
+
+- CalVer bumps immediately on `main` after cutting a release, so in-development builds identify as newer than the last shipped tag. This is what a running dev build reports to the update checker; it will correctly say "up to date" against the GitHub release that was the basis for the bump.
+- SemVer is just a label; nothing compares against it. Bumps once per development cycle (1.1 after shipping 1.0, 1.2 after shipping 1.1, etc.).
+
+`CLAUDE.md` release procedure updated to list both keys to confirm when cutting, and to require bumping both on `main` immediately after a release goes out.

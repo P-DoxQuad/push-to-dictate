@@ -5,7 +5,7 @@ final class AboutWindowController: NSWindowController {
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 440),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 480),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
@@ -25,7 +25,7 @@ final class AboutWindowController: NSWindowController {
         guard let content = window?.contentView else { return }
 
         let info = Bundle.main.infoDictionary
-        let version = (info?["CFBundleShortVersionString"] as? String) ?? "2026.11.0"
+        let version = (info?["PQDisplayVersion"] as? String) ?? "1.1"
         let appIcon = NSApp.applicationIconImage ?? NSImage(named: "push-to-dictate")
             ?? NSImage(size: NSSize(width: 128, height: 128))
 
@@ -97,6 +97,15 @@ final class AboutWindowController: NSWindowController {
         let spacer3 = NSView()
         spacer3.translatesAutoresizingMaskIntoConstraints = false
         spacer3.heightAnchor.constraint(equalToConstant: 8).isActive = true
+        let spacer4 = NSView()
+        spacer4.translatesAutoresizingMaskIntoConstraints = false
+        spacer4.heightAnchor.constraint(equalToConstant: 4).isActive = true
+
+        let updateButton = NSButton()
+        updateButton.bezelStyle = .rounded
+        updateButton.title = "Check for Updates…"
+        updateButton.target = self
+        updateButton.action = #selector(checkForUpdates)
 
         let stack = NSStackView(views: [
             iconView,
@@ -105,7 +114,9 @@ final class AboutWindowController: NSWindowController {
             spacer2,
             description,
             spacer3,
-            credits, copyright
+            credits, copyright,
+            spacer4,
+            updateButton
         ])
         stack.orientation = .vertical
         stack.alignment = .centerX
@@ -124,5 +135,9 @@ final class AboutWindowController: NSWindowController {
             description.widthAnchor.constraint(equalToConstant: 360),
             credits.widthAnchor.constraint(equalToConstant: 360)
         ])
+    }
+
+    @objc private func checkForUpdates() {
+        UpdateCheckWindowController.present()
     }
 }
