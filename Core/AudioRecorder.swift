@@ -25,6 +25,14 @@ final class AudioRecorder {
     var chunkBoundaryThreshold: Float?
     var chunkBoundaryDuration: TimeInterval?
 
+    // Hard cap on chunk duration. When the per-chunk sample count reaches
+    // this many seconds of audio while speech has been seen since the last
+    // boundary, a chunk is emitted regardless of whether a pause has
+    // occurred. Prevents a single chunk from growing unbounded during
+    // sustained speech. The cut is a hard cut; whisper handles fragments
+    // better than you'd expect for short chunks.
+    var chunkBoundaryMaxDuration: TimeInterval?
+
     private(set) var peakRMS: Float = 0
 
     private let engine = AVAudioEngine()
@@ -36,6 +44,7 @@ final class AudioRecorder {
     private var autoStopFired: Bool = false
     private var chunkHasSpeech: Bool = false
     private var chunkSilentSince: Date?
+    private var chunkSampleCount: Int = 0
 
     func start() throws {
         if engine.isRunning { return }
@@ -45,6 +54,7 @@ final class AudioRecorder {
         autoStopFired = false
         chunkHasSpeech = false
         chunkSilentSince = nil
+        chunkSampleCount = 0
         try applyPreferredInputDevice()
 
         let inputNode = engine.inputNode
@@ -171,6 +181,15 @@ final class AudioRecorder {
         bufferQueue.async { [weak self] in
             self?.buffer.append(contentsOf: samples)
         }
+
+        if chunkBoundaryThreshold != nil {
+            chunkSampleCount += count
+            if chunkHasSpeech,
+               let maxDuration = chunkBoundaryMaxDuration,
+               Double(chunkSampleCount) / AudioRecorder.targetSampleRate >= maxDuration {
+                emitChunk()
+            }
+        }
     }
 
     private func emitChunk() {
@@ -181,6 +200,7 @@ final class AudioRecorder {
         }
         chunkHasSpeech = false
         chunkSilentSince = nil
+        chunkSampleCount = 0
         peakRMS = 0
         if chunk.isEmpty { return }
         if let onChunkBoundary = onChunkBoundary {

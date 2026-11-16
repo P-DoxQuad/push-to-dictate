@@ -116,6 +116,12 @@ final class PreferencesWindowController: NSWindowController,
         b.title = "Clear Log…"
         return b
     }()
+    private let resetDefaultsButton: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .rounded
+        b.title = "Reset to Defaults"
+        return b
+    }()
     private let silenceAutoStopCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
@@ -131,6 +137,7 @@ final class PreferencesWindowController: NSWindowController,
         return b
     }()
     private let continuousPauseField = NSTextField()
+    private let continuousMaxChunkField = NSTextField()
     private let typedDelayField = NSTextField()
     private let typedDelayStepper = NSStepper()
 
@@ -142,6 +149,7 @@ final class PreferencesWindowController: NSWindowController,
     private var silenceThresholdLabel: NSTextField?
     private var silenceSecondsLabel: NSTextField?
     private var continuousPauseLabel: NSTextField?
+    private var continuousMaxChunkLabel: NSTextField?
 
     // MARK: - State
 
@@ -274,6 +282,8 @@ final class PreferencesWindowController: NSWindowController,
         clearDebugRecordingsButton.action = #selector(clearDebugRecordings)
         clearLogButton.target = self
         clearLogButton.action = #selector(clearLog)
+        resetDefaultsButton.target = self
+        resetDefaultsButton.action = #selector(resetToDefaults)
 
         silenceAutoStopCheckbox.target = self
         silenceAutoStopCheckbox.action = #selector(silenceAutoStopChanged)
@@ -283,6 +293,7 @@ final class PreferencesWindowController: NSWindowController,
         continuousDictationCheckbox.target = self
         continuousDictationCheckbox.action = #selector(continuousDictationChanged)
         continuousPauseField.delegate = self
+        continuousMaxChunkField.delegate = self
 
         typedDelayStepper.minValue = 5
         typedDelayStepper.maxValue = 100
@@ -586,10 +597,21 @@ final class PreferencesWindowController: NSWindowController,
         pauseRow.orientation = .horizontal
         pauseRow.spacing = 8
 
+        continuousMaxChunkField.translatesAutoresizingMaskIntoConstraints = false
+        continuousMaxChunkField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let maxChunkHint = NSTextField(frame: .zero)
+        maxChunkHint.isEditable = false; maxChunkHint.isSelectable = false
+        maxChunkHint.isBordered = false; maxChunkHint.drawsBackground = false
+        maxChunkHint.textColor = .secondaryLabelColor
+        maxChunkHint.stringValue = "seconds · default 30.0 · min 5.0 · hard cut after this much continuous speech"
+        let maxChunkRow = NSStackView(views: [continuousMaxChunkField, maxChunkHint])
+        maxChunkRow.orientation = .horizontal
+        maxChunkRow.spacing = 8
+
         let lw = PreferencesWindowController.widestLabelWidth(
             ["Input device:", "Start sound:", "Stop sound:",
              "Auto-stop:", "Silence threshold:", "Silence duration:",
-             "Continuous:", "Pause:"])
+             "Continuous:", "Pause:", "Max chunk:"])
         let after1 = placeRow(labelText: "Input device:", control: inputDevicePopup,
                               in: pane, topAnchor: pane.topAnchor, topConstant: 0, labelWidth: lw)
         let after2 = placeRow(labelText: "Start sound:", control: startSoundPopup,
@@ -616,7 +638,11 @@ final class PreferencesWindowController: NSWindowController,
                                    in: pane, topAnchor: after7,
                                    topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
         continuousPauseLabel = r8.label
-        pane.bottomAnchor.constraint(equalTo: r8.bottom).isActive = true
+        let r9 = placeRowWithLabel(labelText: "Max chunk:", control: maxChunkRow,
+                                   in: pane, topAnchor: r8.bottom,
+                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        continuousMaxChunkLabel = r9.label
+        pane.bottomAnchor.constraint(equalTo: r9.bottom).isActive = true
         return pane
     }
 
@@ -633,7 +659,7 @@ final class PreferencesWindowController: NSWindowController,
         delayHint.isEditable = false; delayHint.isSelectable = false
         delayHint.isBordered = false; delayHint.drawsBackground = false
         delayHint.textColor = .secondaryLabelColor
-        delayHint.stringValue = "ms per character · default 5 · max 100 · higher = fewer dropped keystrokes"
+        delayHint.stringValue = "ms per character · default 8 · max 100 · higher = fewer dropped keystrokes"
         let delayRow = NSStackView(views: [typedDelayField, typedDelayStepper, delayHint])
         delayRow.orientation = .horizontal
         delayRow.spacing = 8
@@ -684,7 +710,7 @@ final class PreferencesWindowController: NSWindowController,
         beamHint.isEditable = false; beamHint.isSelectable = false
         beamHint.isBordered = false; beamHint.drawsBackground = false
         beamHint.textColor = .secondaryLabelColor
-        beamHint.stringValue = "1 = fastest · 5 = default · 10 = slowest"
+        beamHint.stringValue = "1 = fastest · 3 = default · 10 = slowest"
 
         let beamRow = NSStackView(views: [beamField, beamStepper, beamHint])
         beamRow.orientation = .horizontal
@@ -700,7 +726,8 @@ final class PreferencesWindowController: NSWindowController,
         loggingRow.spacing = 12
 
         let lw = PreferencesWindowController.widestLabelWidth(
-            ["Transcription threads:", "Accuracy:", "Debug recordings:", "Logging:"])
+            ["Transcription threads:", "Accuracy:", "Debug recordings:", "Logging:",
+             "Preferences:"])
 
         let r1 = placeRowWithLabel(labelText: "Transcription threads:", control: threadsRow,
                                    in: pane, topAnchor: pane.topAnchor, topConstant: 0,
@@ -718,7 +745,10 @@ final class PreferencesWindowController: NSWindowController,
         let after4 = placeRow(labelText: "Logging:", control: loggingRow,
                               in: pane, topAnchor: after3,
                               topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        pane.bottomAnchor.constraint(equalTo: after4).isActive = true
+        let after5 = placeRow(labelText: "Preferences:", control: resetDefaultsButton,
+                              in: pane, topAnchor: after4,
+                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        pane.bottomAnchor.constraint(equalTo: after5).isActive = true
         return pane
     }
 
@@ -793,6 +823,8 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.continuousDictationEnabled ? .on : .off
         continuousPauseField.stringValue = String(format: "%.1f",
             Preferences.shared.continuousDictationPauseSeconds)
+        continuousMaxChunkField.stringValue = String(format: "%.1f",
+            Preferences.shared.continuousDictationMaxChunkSeconds)
         let typedDelay = Preferences.shared.typedKeystrokeDelayMs
         typedDelayField.integerValue = typedDelay
         typedDelayStepper.integerValue = typedDelay
@@ -1107,6 +1139,16 @@ final class PreferencesWindowController: NSWindowController,
         Logger.clear()
     }
 
+    @objc private func resetToDefaults() {
+        Preferences.shared.resetUserPreferences()
+        // Hotkey, model selection, mode, colored-icon toggle all influence
+        // the status-bar UI. Notify the main controller so icon + menu-bar
+        // menu re-pick up fresh values along with the Preferences UI itself.
+        onHotkeyChanged?()
+        onColoredIconChanged?()
+        refreshAll()
+    }
+
     @objc private func clearDebugRecordings() {
         let fm = FileManager.default
         let dir = Preferences.debugRecordingsDirectory
@@ -1300,6 +1342,15 @@ final class PreferencesWindowController: NSWindowController,
                 setNumericFieldValid(field: continuousPauseField,
                                      label: continuousPauseLabel, valid: false)
             }
+        case continuousMaxChunkField:
+            if let v = Double(continuousMaxChunkField.stringValue), v >= 5.0, v <= 30.0 {
+                Preferences.shared.continuousDictationMaxChunkSeconds = v
+                setNumericFieldValid(field: continuousMaxChunkField,
+                                     label: continuousMaxChunkLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: continuousMaxChunkField,
+                                     label: continuousMaxChunkLabel, valid: false)
+            }
         default:
             break
         }
@@ -1326,6 +1377,9 @@ final class PreferencesWindowController: NSWindowController,
         case continuousPauseField:
             guard let v = Double(continuousPauseField.stringValue) else { return false }
             return v >= 0.3 && v <= 2.0
+        case continuousMaxChunkField:
+            guard let v = Double(continuousMaxChunkField.stringValue) else { return false }
+            return v >= 5.0 && v <= 30.0
         default:
             return true
         }
@@ -1363,6 +1417,11 @@ final class PreferencesWindowController: NSWindowController,
                 Preferences.shared.continuousDictationPauseSeconds)
             setNumericFieldValid(field: continuousPauseField,
                                  label: continuousPauseLabel, valid: true)
+        case continuousMaxChunkField:
+            continuousMaxChunkField.stringValue = String(format: "%.1f",
+                Preferences.shared.continuousDictationMaxChunkSeconds)
+            setNumericFieldValid(field: continuousMaxChunkField,
+                                 label: continuousMaxChunkLabel, valid: true)
         default:
             break
         }

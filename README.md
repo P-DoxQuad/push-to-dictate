@@ -20,10 +20,12 @@ Runs on CPU. No GPU, Neural Engine, or network connection is used by the local b
 - Two activation modes: Toggle (tap on, tap off) and Push-to-talk (hold to record, release to transcribe).
 - Local transcription backend: [whisper.cpp](https://github.com/ggerganov/whisper.cpp) v1.7.2 compiled with SSE4.2 only, Accelerate BLAS auto-detected.
 - Remote transcription backend: OpenAI Whisper API (`whisper-1`).
-- Text insertion methods: pasteboard (default) or synthetic Unicode keystrokes.
+- Text insertion methods: pasteboard or synthetic Unicode keystrokes.
 - Model catalog with hardware-aware per-model rating.
 - Custom model download via arbitrary `ggml-*.bin` URL.
-- Preferences backup and restore to plist.
+- Continuous dictation (experimental, Toggle mode only): transcribes mid-session on short pauses instead of waiting for the user to stop, with prompt-chaining across chunks for context. Mutually exclusive with silence auto-stop.
+- Silence auto-stop: ends the recording session automatically after a configurable period of silence.
+- Preferences backup and restore to plist. Reset-to-defaults button in Advanced.
 - Manual update check against the GitHub Releases API. User-initiated, no auto-download. Skipping a version is persistent until a newer one appears.
 
 ## Installation
@@ -77,8 +79,6 @@ Exposed through Preferences → Transcription → Manage Models:
 | Filename                             | Size   |
 |--------------------------------------|--------|
 | `ggml-small.en-q8_0.bin`             | 252 MB |
-| `ggml-medium.en-q8_0.bin`            | 785 MB |
-| `ggml-large-v3-turbo-q8_0.bin`       | 834 MB |
 
 Download target: `~/Library/Application Support/push-to-dictate/models/`. Overridable via `Preferences.modelsDirectory`. A custom-URL field accepts any `ggml-*.bin`.
 
@@ -96,10 +96,10 @@ Clicking the status-bar icon reveals, top to bottom: a disabled status block (ac
 
 - **General**: hotkey, launch at login, preferences backup export/import.
 - **Transcription**: backend, local model, Manage Models, models folder override, OpenAI API key.
-- **Audio**: input device, start/stop sounds.
-- **Output**: text insertion method.
+- **Audio**: input device, start/stop sounds, silence auto-stop, continuous dictation (pause length, max chunk length).
+- **Output**: text insertion method, typed keystroke delay.
 - **Interface**: colored menu-bar icon toggle.
-- **Advanced**: transcription threads, accuracy (beam size), debug recording toggle, logging.
+- **Advanced**: transcription threads, accuracy (beam size), debug recording toggle, logging, reset-to-defaults.
 
 Storage: `UserDefaults` for most values. OpenAI API key is stored in the Keychain under service `push-to-dictate`.
 

@@ -933,4 +933,40 @@ Audio pane gains two rows at the bottom: `Continuous:` checkbox and `Pause:` num
 
 #### What's deferred
 
-Mid-chunk audio length cap (force a cut if a single chunk grows beyond N seconds of continuous speech), `whisper-server` for model-residency, parallel transcription with sequence-number ordered injection. All discussed; none worth building yet.
+`whisper-server` for model-residency, parallel transcription with sequence-number ordered injection. Discussed; not worth building yet at the single-user dictation scale.
+
+### 2026-11-16 — Continuous dictation refinements, preference defaults, Reset to Defaults
+
+#### Max chunk length preference
+
+`AudioRecorder.chunkBoundaryMaxDuration` is now driven by the new `continuousDictationMaxChunkSeconds` preference (default 30.0, range [5.0, 30.0], exposed as `Max chunk:` in the Audio pane under the `Pause:` field). Live testing showed the previously-hardcoded 3.0 s cap cut mid-sentence frequently and was the dominant cause of boundary artifacts; 30.0 s matches whisper's native internal window and in practice almost never triggers on natural speech because people breathe. The cap acts as a safety upper bound for monologue-pattern dictation, not as a primary chunking mechanism — pause detection is the primary mechanism.
+
+#### Prompt chaining across chunks
+
+`WhisperCppTranscriber.initialPrompt: String?` added. When set, the whisper-cli invocation gets `--prompt "<text>"` appended, seeding whisper's language-model state with prior context. This is the single biggest quality-of-transcription lever for continuous mode: it eliminates the "each chunk is a fresh conversation" problem that produced mishears (`click note` for `quick note`, `Russia` for `roughly`, `grab it coffee` for `grab a coffee`) and word-at-boundary duplications (`I I`, `the the`).
+
+`StatusItemController.continuousPromptBuffer` is a rolling tail of transcribed text within the session, capped at 600 characters to stay inside whisper's prompt token budget. Reset on each new session. The buffer is read at **dequeue time** (inside the serial queue's task), not enqueue time: by the time a chunk's task runs, all prior serial tasks have completed, and their cleaned text is in the buffer. The result handler uses `DispatchQueue.main.sync` so the next task sees this chunk's output when it reads the prompt.
+
+#### Non-speech token filter
+
+`StatusItemController.cleanContinuousTranscript(_:)` strips whisper's annotation tokens (`[BLANK_AUDIO]`, `[MUSIC]`, `[SILENCE]`, `(soft music)`, `(laughter)`) from chunk transcripts before injection. These tokens are whisper's deliberate output for non-speech audio and show up frequently in continuous mode because the chunk-on-pause flow routinely feeds whisper short low-signal fragments. Regex strips both bracketed and parenthetical annotations, collapses the resulting whitespace, and the result is discarded entirely if it contains no letter or digit (catches pure-ellipsis outputs). Single-shot path left untouched.
+
+#### Beam override
+
+`WhisperCppTranscriber.beamSizeOverride: Int?` added. The continuous path sets it to `2` (down from the initially-tried 1 to add decode robustness without the latency of 3). Single-shot dictation continues to use the user's saved `beamSize` preference.
+
+#### Default changes
+
+- `beamSize` default: `5 → 3` (set earlier in v1.1 default-tuning; hint text just now caught up to say `3 = default`).
+- `typedKeystrokeDelayMs` default: `5 → 8`. Test runs showed 5 ms produced the occasional dropped keystroke on busier systems; 8 ms is noticeably more reliable with minimal perceptible delay.
+- `transcriptionThreads` default: hardcoded `6` → dynamic. New `Preferences.defaultTranscriptionThreads` formula: `logical ≤ 12 ? logical / 2 : logical / 3`, floor of 1. Matches the "Recommended" range shown in the hint label and avoids the NUMA / HT tax on large-core machines. On dual-socket Westmere (logical 24): 8. On a quad-core laptop (logical 8): 4.
+- `continuousDictationPauseSeconds` default: `0.8 → 0.5` (early in this session).
+- `continuousDictationMaxChunkSeconds` default: `3.0 → 30.0` (this subsection above).
+
+#### Reset to Defaults
+
+New button in the Advanced pane under a `Preferences:` row label. Calls `Preferences.resetUserPreferences()`, which iterates `allUserDefaultsKeys` and removes each except the set of `internalFlagKeys` (`suppressedMoveToApplicationsPrompt`, `didAutoSelectModel`, `didShowWelcomeTooltip`, `skippedUpdateVersion`). Keychain-stored OpenAI API key is left alone — credentials shouldn't vanish in a preferences reset.
+
+No confirmation dialog: destructive-action convention is to prompt, but the explicit directive here was that it's unnecessary for a preferences-only reset where no data is lost and the user can just re-tune anything they'd changed.
+
+After the reset: the button handler also invokes `onHotkeyChanged`/`onColoredIconChanged` callbacks on the controller so the status-bar icon and menu re-pick up the fresh defaults (hotkey binding, colored vs monochrome icon) alongside the Preferences UI re-rendering via `refreshAll`.

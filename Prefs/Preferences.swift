@@ -40,6 +40,7 @@ final class Preferences {
         static let skippedUpdateVersion = "skippedUpdateVersion"
         static let continuousDictationEnabled = "continuousDictationEnabled"
         static let continuousDictationPauseSeconds = "continuousDictationPauseSeconds"
+        static let continuousDictationMaxChunkSeconds = "continuousDictationMaxChunkSeconds"
     }
 
     static let noSoundName = "None"
@@ -125,10 +126,23 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.suppressedMoveToApplicationsPrompt) }
     }
 
+    static var defaultTranscriptionThreads: Int {
+        // Scales with the host's logical core count. ≤12 logical cores: half.
+        // >12 logical cores: a third. Matches the "Recommended" range the
+        // PreferencesWindowController shows in its threads-hint label and
+        // avoids the NUMA / HT tax from over-subscribing on large machines
+        // (dual-socket Mac Pros, high-core Apple-silicon systems under
+        // Rosetta, etc). Floor of 1 so single-core systems still get a
+        // sensible value.
+        let logical = ProcessInfo.processInfo.activeProcessorCount
+        let scaled = logical <= 12 ? logical / 2 : logical / 3
+        return max(1, scaled)
+    }
+
     var transcriptionThreads: Int {
         get {
             let stored = defaults.integer(forKey: Key.transcriptionThreads)
-            return stored == 0 ? 6 : stored
+            return stored == 0 ? Preferences.defaultTranscriptionThreads : stored
         }
         set { defaults.set(newValue, forKey: Key.transcriptionThreads) }
     }
@@ -184,6 +198,14 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.continuousDictationPauseSeconds) }
     }
 
+    var continuousDictationMaxChunkSeconds: Double {
+        get {
+            let stored = defaults.double(forKey: Key.continuousDictationMaxChunkSeconds)
+            return stored == 0 ? 30.0 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationMaxChunkSeconds) }
+    }
+
     var silenceAutoStopThreshold: Double {
         get {
             let stored = defaults.double(forKey: Key.silenceAutoStopThreshold)
@@ -203,7 +225,7 @@ final class Preferences {
     var typedKeystrokeDelayMs: Int {
         get {
             let stored = defaults.integer(forKey: Key.typedKeystrokeDelayMs)
-            return stored == 0 ? 5 : stored
+            return stored == 0 ? 8 : stored
         }
         set { defaults.set(newValue, forKey: Key.typedKeystrokeDelayMs) }
     }
@@ -305,6 +327,27 @@ final class Preferences {
         return base.appendingPathComponent("push-to-dictate", isDirectory: true)
     }
 
+    // Keys that are internal state, not user preferences. Reset-to-defaults
+    // deliberately preserves these so first-launch flows aren't re-triggered
+    // and a skipped update version stays skipped. Backup export/import still
+    // includes them so a user's full state round-trips correctly.
+    static let internalFlagKeys: Set<String> = [
+        Key.suppressedMoveToApplicationsPrompt,
+        Key.didAutoSelectModel,
+        Key.didShowWelcomeTooltip,
+        Key.skippedUpdateVersion
+    ]
+
+    // Clears all user-facing preferences back to code defaults. Leaves
+    // internalFlagKeys alone and leaves the Keychain-stored OpenAI API key
+    // alone. UI must refresh after calling this.
+    func resetUserPreferences() {
+        for key in Preferences.allUserDefaultsKeys {
+            if Preferences.internalFlagKeys.contains(key) { continue }
+            defaults.removeObject(forKey: key)
+        }
+    }
+
     // All UserDefaults keys we read/write. Used by the backup export/import.
     // Deliberately omits openAIAPIKeyLegacy (only used for one-shot Keychain migration).
     static let allUserDefaultsKeys: [String] = [
@@ -320,7 +363,8 @@ final class Preferences {
         Key.silenceAutoStopEnabled, Key.silenceAutoStopThreshold,
         Key.silenceAutoStopSeconds, Key.typedKeystrokeDelayMs,
         Key.skippedUpdateVersion,
-        Key.continuousDictationEnabled, Key.continuousDictationPauseSeconds
+        Key.continuousDictationEnabled, Key.continuousDictationPauseSeconds,
+        Key.continuousDictationMaxChunkSeconds
     ]
 
     // MARK: - Keychain

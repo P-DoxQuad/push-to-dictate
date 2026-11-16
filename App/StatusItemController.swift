@@ -32,6 +32,12 @@ final class StatusItemController: NSObject,
     private var pendingContinuousChunks: Int = 0
     private var drainingAfterContinuous: Bool = false
     private var continuousModeActive: Bool = false
+    // Rolling tail of transcribed text within the current continuous session.
+    // Passed to each subsequent chunk's whisper-cli via --prompt so the model
+    // has language-model context across chunk boundaries. Reset on session
+    // start. Capped so the whisper prompt token budget isn't exceeded.
+    private var continuousPromptBuffer: String = ""
+    private static let continuousPromptMaxChars: Int = 600
 
     private enum IconState { case idle, recording, processing, error }
     private var iconState: IconState = .idle
@@ -400,6 +406,7 @@ final class StatusItemController: NSObject,
             // draining in the background, but don't want their completion to
             // flip our icon back to .idle while this new session is active.
             drainingAfterContinuous = false
+            continuousPromptBuffer = ""
             continuousModeActive =
                 hotkeyMonitor.mode == .toggle &&
                 Preferences.shared.continuousDictationEnabled
@@ -472,12 +479,14 @@ final class StatusItemController: NSObject,
             // is a single mental model; no reason to ask for it twice.
             audioRecorder.chunkBoundaryThreshold = Float(prefs.silenceAutoStopThreshold)
             audioRecorder.chunkBoundaryDuration = prefs.continuousDictationPauseSeconds
+            audioRecorder.chunkBoundaryMaxDuration = prefs.continuousDictationMaxChunkSeconds
             audioRecorder.onChunkBoundary = { [weak self] samples in
                 self?.handleContinuousChunk(samples)
             }
         } else {
             audioRecorder.chunkBoundaryThreshold = nil
             audioRecorder.chunkBoundaryDuration = nil
+            audioRecorder.chunkBoundaryMaxDuration = nil
             audioRecorder.onChunkBoundary = nil
         }
     }
@@ -493,19 +502,32 @@ final class StatusItemController: NSObject,
     private func enqueueContinuousChunk(samples: [Float]) {
         pendingContinuousChunks += 1
         let transcriber = makeTranscriber()
-        // Force beam=1 for continuous chunks. Short chunks don't benefit much
-        // from higher beam widths and the per-chunk latency dominates the
-        // felt experience. Override is per-instance so single-shot dictation
-        // keeps using the user's saved beamSize preference.
+        // Beam=2 for continuous chunks. Compromise between beam=1's speed
+        // and beam=3's repetition-loop safety; prompt chaining and larger
+        // chunks carry most of the quality load now. Override is
+        // per-instance so single-shot dictation keeps using the user's
+        // saved beamSize preference.
         if let whisper = transcriber as? WhisperCppTranscriber {
-            whisper.beamSizeOverride = 1
+            whisper.beamSizeOverride = 2
         }
         let backendLabel = Preferences.shared.backend.rawValue
         let startedAt = Date()
         Logger.info("continuous: transcribing \(samples.count) samples via \(backendLabel)")
         continuousQueue.async { [weak self] in
-            // Serialize the per-chunk callback so FIFO order is preserved.
-            // The transcriber is async; block the serial queue on its result.
+            // Read the prompt tail at dequeue time: by the time the serial
+            // queue runs this task, all previous tasks have completed, and
+            // handleContinuousResult (invoked synchronously below) will have
+            // appended their text to continuousPromptBuffer.
+            DispatchQueue.main.sync {
+                guard let self = self else { return }
+                if !self.continuousPromptBuffer.isEmpty,
+                   let whisper = transcriber as? WhisperCppTranscriber {
+                    whisper.initialPrompt = self.continuousPromptBuffer
+                }
+            }
+
+            // Block the serial queue on the transcriber's async completion
+            // so FIFO order is preserved end-to-end.
             let sem = DispatchSemaphore(value: 0)
             var captured: TranscriberResult?
             transcriber.transcribe(audio: samples) { result in
@@ -514,10 +536,62 @@ final class StatusItemController: NSObject,
             }
             sem.wait()
             let elapsed = Date().timeIntervalSince(startedAt)
-            DispatchQueue.main.async {
+
+            // Synchronous dispatch so this chunk's text is committed to the
+            // prompt buffer before the next serial task starts reading it.
+            DispatchQueue.main.sync {
                 self?.handleContinuousResult(captured, elapsed: elapsed)
             }
         }
+    }
+
+    private func appendToContinuousPromptBuffer(_ text: String) {
+        if !continuousPromptBuffer.isEmpty {
+            continuousPromptBuffer.append(" ")
+        }
+        continuousPromptBuffer.append(text)
+        let max = StatusItemController.continuousPromptMaxChars
+        if continuousPromptBuffer.count > max {
+            let overflow = continuousPromptBuffer.count - max
+            let start = continuousPromptBuffer.index(
+                continuousPromptBuffer.startIndex, offsetBy: overflow)
+            continuousPromptBuffer = String(continuousPromptBuffer[start...])
+        }
+    }
+
+    // Removes whisper's non-speech annotation tokens that leak into the
+    // transcript on silent / near-silent chunks: things like [BLANK_AUDIO],
+    // [MUSIC], (soft music), (laughter). In single-shot dictation these are
+    // rare because the whole recording tends to have speech; in continuous
+    // mode the chunk-on-pause flow routinely feeds whisper short low-signal
+    // fragments and the tokens show up frequently. Also drops pure-ellipsis
+    // or punctuation-only results that would otherwise inject stray dots.
+    private static func cleanContinuousTranscript(_ text: String) -> String {
+        var cleaned = text
+        let patterns = [
+            "\\[[^\\]]*\\]",
+            "\\([^\\)]*\\)"
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+                continue
+            }
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            cleaned = regex.stringByReplacingMatches(
+                in: cleaned, options: [], range: range, withTemplate: "")
+        }
+        if let ws = try? NSRegularExpression(pattern: "\\s+", options: []) {
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            cleaned = ws.stringByReplacingMatches(
+                in: cleaned, options: [], range: range, withTemplate: " ")
+        }
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Require at least one letter or digit, else treat as empty (drops
+        // whisper outputs that boil down to just "..." or similar).
+        let hasContent = cleaned.unicodeScalars.contains {
+            CharacterSet.alphanumerics.contains($0)
+        }
+        return hasContent ? cleaned : ""
     }
 
     private func handleContinuousResult(_ result: TranscriberResult?,
@@ -528,14 +602,13 @@ final class StatusItemController: NSObject,
             case .success(let text):
                 Logger.info(String(format: "continuous transcript (%.2fs): %@",
                                    elapsed, text))
-                // Trim whisper's inconsistent leading/trailing whitespace,
-                // then append a trailing space. Trailing-space (rather than
-                // leading-space-after-first) separates chunks correctly even
-                // when the user hits Enter mid-session or toggles across
-                // sessions, without leaving a stray space on the new line.
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    textInjector.insert("\(trimmed) ")
+                let cleaned = StatusItemController.cleanContinuousTranscript(text)
+                if !cleaned.isEmpty {
+                    // Trailing space (rather than leading-space-after-first)
+                    // separates chunks correctly even when the user hits
+                    // Enter mid-session or toggles across sessions, without
+                    // leaving a stray space on the new line.
+                    textInjector.insert("\(cleaned) ")
                 }
             case .failure(let error):
                 Logger.error("continuous chunk transcription failed",

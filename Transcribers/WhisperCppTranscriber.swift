@@ -7,10 +7,17 @@ final class WhisperCppTranscriber: Transcriber {
     var language: String = "en"
 
     // When non-nil, overrides `Preferences.beamSize` for this transcriber
-    // instance only. Used by continuous dictation to force beam=1 (speed over
-    // accuracy, to keep up with short-chunk throughput) without mutating the
-    // user's saved preference used by one-shot dictation.
+    // instance only. Used by continuous dictation to force a different beam
+    // (currently 3) without mutating the user's saved preference used by
+    // one-shot dictation.
     var beamSizeOverride: Int?
+
+    // When non-nil and non-empty, seeds whisper's language-model state via
+    // the `--prompt` flag so it has context about what came before the audio
+    // being transcribed. Used by continuous dictation to pass the last N
+    // characters of prior transcript into each chunk, reducing boundary
+    // artifacts (word duplication, mishears, hallucinated filler).
+    var initialPrompt: String?
 
     init(executableURL: URL, modelURL: URL) {
         self.executableURL = executableURL
@@ -93,7 +100,7 @@ final class WhisperCppTranscriber: Transcriber {
         let beam = String(beamSizeOverride ?? prefs.beamSize)
         let process = Process()
         process.launchPath = executableURL.path
-        process.arguments = [
+        var args: [String] = [
             "-m", modelURL.path,
             "-f", wavURL.path,
             "-l", language,
@@ -102,6 +109,10 @@ final class WhisperCppTranscriber: Transcriber {
             "-bo", beam,
             "-nt"
         ]
+        if let prompt = initialPrompt, !prompt.isEmpty {
+            args.append(contentsOf: ["--prompt", prompt])
+        }
+        process.arguments = args
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
