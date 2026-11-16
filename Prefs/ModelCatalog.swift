@@ -104,25 +104,25 @@ enum ModelCatalog {
             isBundled: false,
             minTier: .low,
             isCustom: false
-        ),
-        CatalogModel(
-            displayName: "medium.en (Q8_0)",
-            filename: "ggml-medium.en-q8_0.bin",
-            sizeBytes: 823_382_461,
-            url: URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases/download/openai-models-v1/ggml-medium.en-q8_0.bin")!,
-            isBundled: false,
-            minTier: .mid,
-            isCustom: false
-        ),
-        CatalogModel(
-            displayName: "large-v3-turbo (Q8_0)",
-            filename: "ggml-large-v3-turbo-q8_0.bin",
-            sizeBytes: 874_188_075,
-            url: URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases/download/openai-models-v1/ggml-large-v3-turbo-q8_0.bin")!,
-            isBundled: false,
-            minTier: .high,
-            isCustom: false
         )
+//        CatalogModel(
+//            displayName: "medium.en (Q8_0)",
+//            filename: "ggml-medium.en-q8_0.bin",
+//            sizeBytes: 823_382_461,
+//            url: URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases/download/openai-models-v1/ggml-medium.en-q8_0.bin")!,
+//            isBundled: false,
+//            minTier: .mid,
+//            isCustom: false
+//        ),
+//        CatalogModel(
+//            displayName: "large-v3-turbo (Q8_0)",
+//            filename: "ggml-large-v3-turbo-q8_0.bin",
+//            sizeBytes: 874_188_075,
+//            url: URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases/download/openai-models-v1/ggml-large-v3-turbo-q8_0.bin")!,
+//            isBundled: false,
+//            minTier: .high,
+//            isCustom: false
+//        )
     ]
 
     /// First-launch pick: the highest-tier catalog entry whose rating is `.recommended`

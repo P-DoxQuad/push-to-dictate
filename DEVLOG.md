@@ -867,3 +867,30 @@ Implemented by extending `UpdateCheckWindowController.present` to take two callb
 #### Simulation toggle on `UpdateChecker`
 
 New compile-time flag `UpdateChecker.simulateUpdateAvailable` (default `false`) short-circuits the GitHub API call and returns a synthetic `.updateAvailable(current, "2026.99.0", <releases page URL>)` after a 0.4s delay, so the full Check → badge → Skip → re-check loop can be exercised without waiting on a newer release to actually appear upstream. Used during this cycle's UI iteration; left in place behind the flag for future flow testing.
+
+### 2026-11-15 — Accessibility copy, status-row labels, catalog pruning
+
+#### Accessibility window copy
+
+Under ad-hoc ("Sign to Run Locally") signing, replacing the installed binary with a newer build leaves a stale TCC entry whose stored code-signature requirement no longer matches the new binary. `AXIsProcessTrusted()` returns false even when the user sees the box checked in the Accessibility list. Toggling the box off and on does not recover the grant, because the stored requirement is what the toggle re-evaluates against. The only user-side recovery is to remove the entry via the minus button and re-add the new binary via the plus button. macOS exposes no API that lets the app delete its own TCC entry.
+
+Body text in `AccessibilityRequestWindowController` is now explicit about both paths. Fresh-install paragraph names the action directly: open System Preferences, find Push to Dictate in the Accessibility list, check the box. Stale-entry paragraph (new): if Push to Dictate already appears but access isn't taking effect, select the entry and click the minus button to remove it, followed by the plus button to add it again. Window height 240 → 320 to fit the longer body.
+
+No code paths changed. The v1.1 window continues to poll `AXIsProcessTrusted()` while visible, re-init the event tap on grant, and auto-restart when in-place re-init hits the macOS trust-cached-false quirk. `openAccessibilityPreferences` button still only opens the Prefs URL. No `AXIsProcessTrustedWithOptions` call anywhere; no macOS system sheet is ever summoned by this app, so the custom window cannot overlap a system sheet on any OS.
+
+Close-path bug fixed in the same controller: closing the window via the red traffic-light button used to leave the controller in a half-dismissed state. `dismiss()` was the only code path clearing `active` and calling `onMenuShouldRefresh`, and it was only wired to the Later button. The red X went through AppKit's own close, skipped both, and left `active` non-nil. `refreshAccessibilityMenuItem` gates visibility on `active == nil`, so the "Grant Accessibility Access…" status-menu item stayed hidden even with permission still missing — no path back to the prompt. Controller now adopts `NSWindowDelegate` and runs stop-polling + clear-active + refresh-menu from `windowWillClose`, which fires for every close path. `dismiss()` itself is slimmed to just call `window?.close()`.
+
+#### Status-row label tweaks
+
+Two of the three status rows at the top of the menu got renamed for clarity:
+
+- `Threads: N` → `Thread Usage: N`. The underlying value still comes from `Preferences.transcriptionThreads` (the `-t` passed to `whisper-cli`). The new label reads more like "how many threads the transcribe uses" rather than ambiguously "how many threads exist on the system."
+- `Behavior: <mode> · <method>` → `Modes: <mode> · <method>`. "Modes" matches the fact that both halves are selectable modes (activation mode, injection mode), where "Behavior" was vaguer.
+
+`Model:` row unchanged.
+
+#### Model catalog pruning
+
+`medium.en-q8_0` and `large-v3-turbo-q8_0` are commented out in `ModelCatalog.swift` (not deleted, so the entries can come back later without rewriting). Testing on both the Westmere-era Mac Pro 5,1 host and an M2 Pro Mac Mini (running under Rosetta 2) showed them to be too slow to be practically usable for push-to-dictate's short-dictation use case. If they're unusable on both the oldest supported hardware and a recent Apple-silicon machine, keeping them in the download list is just a trap for users on anything in between.
+
+Active downloadable catalog is now `small.en-q8_0` only. Bundled models (`tiny.en-q8_0`, `base.en-q8_0`) are unchanged. The `.mid` and `.high` `CatalogModel.Tier` cases survive because the commented block still references them; keeping the enum intact avoids churn if the models come back. First-launch auto-pick iterates the active catalog so it correctly picks from what's shipping. Users who already have a medium or large model on disk from a prior install still have it resolved via `whisperModelPath`'s writable-directory lookup — pruning the catalog doesn't delete anything from `~/Library/Application Support/push-to-dictate/models/`, it just removes the Manage Models entries that would offer those filenames as downloads.

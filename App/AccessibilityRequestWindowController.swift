@@ -1,6 +1,6 @@
 import Cocoa
 
-final class AccessibilityRequestWindowController: NSWindowController {
+final class AccessibilityRequestWindowController: NSWindowController, NSWindowDelegate {
 
     static private(set) var active: AccessibilityRequestWindowController?
 
@@ -14,13 +14,14 @@ final class AccessibilityRequestWindowController: NSWindowController {
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 240),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
         window.title = "Accessibility Access"
         window.isReleasedWhenClosed = false
         self.init(window: window)
+        window.delegate = self
         buildLayout()
     }
 
@@ -66,8 +67,11 @@ final class AccessibilityRequestWindowController: NSWindowController {
         bodyLabel.alignment = .center
         bodyLabel.stringValue = "Push to Dictate needs Accessibility access to listen for its "
             + "global hotkey and to insert transcribed text into other apps.\n\n"
-            + "Open System Preferences, add Push to Dictate to the Accessibility list, "
-            + "then check the box. This window will update automatically once access is granted."
+            + "Open System Preferences and search for Push to Dictate in the Accessibility list. "
+            + "Then check the box.\n\n"
+            + "If Push to Dictate already appears but access isn't taking effect, "
+            + "select the entry and click "
+            + "the minus button to remove it, followed by clicking the plus button to add the entry again."
 
         primaryButton.bezelStyle = .rounded
         primaryButton.title = "Open Accessibility Preferences"
@@ -165,8 +169,17 @@ final class AccessibilityRequestWindowController: NSWindowController {
     }
 
     @objc private func dismiss() {
-        stopPolling()
         window?.close()
+    }
+
+    // Catches both Later-button dismiss (via dismiss → window.close) and the
+    // red traffic-light close button. Without this, closing via the red X
+    // would leave `active` non-nil and `onMenuShouldRefresh` uncalled, so the
+    // status menu's "Grant Accessibility Access…" item would stay hidden
+    // despite permission still being missing — stale state with no path
+    // back to the prompt.
+    func windowWillClose(_ notification: Notification) {
+        stopPolling()
         AccessibilityRequestWindowController.active = nil
         onMenuShouldRefresh?()
     }

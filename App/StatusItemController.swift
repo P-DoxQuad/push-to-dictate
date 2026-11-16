@@ -816,7 +816,7 @@ final class StatusItemController: NSObject,
         case .whisperCpp:
             let stem = (prefs.localModelFilename as NSString).deletingPathExtension
             modelStatusItem.title = "Model: \(stem)"
-            threadsStatusItem.title = "Threads: \(prefs.transcriptionThreads)"
+            threadsStatusItem.title = "Thread Usage: \(prefs.transcriptionThreads)"
             threadsStatusItem.isHidden = false
         case .openAI:
             modelStatusItem.title = "Model: whisper-1 (OpenAI)"
@@ -825,7 +825,7 @@ final class StatusItemController: NSObject,
 
         let mode = (prefs.hotkeyMode == .pushToTalk) ? "Push-to-talk" : "Toggle"
         let method = (prefs.injectionMethod == .typed) ? "Typed" : "Pasted"
-        behaviorStatusItem.title = "Behavior: \(mode) · \(method)"
+        behaviorStatusItem.title = "Modes: \(mode) · \(method)"
     }
 
     private func syncModeMenuState() {
