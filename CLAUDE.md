@@ -25,6 +25,23 @@ Applies to all project docs (CLAUDE.md, README.md, DEVLOG.md, THIRD_PARTY_NOTICE
 - Source layout: `App/`, `Core/`, `Transcribers/`, `Prefs/`, `icons/`.
 - whisper.cpp: pinned to v1.7.2. Build `whisper-cli` for x86_64 via `scripts/setup.sh`. Models bundled in `.app/Contents/Resources/`; writable fallback is `~/Library/Application Support/push-to-dictate/models/`.
 
+## Swift 4.2 ceiling
+
+CRITICAL. The compiler is Swift 4.2 on Xcode 10.1. Swift 5 APIs do not exist here. Before writing any Swift expression that looks natural in modern Swift, verify it's not a Swift 5 addition. Common Swift 5-only APIs that have bitten this codebase:
+
+- `Character.isNumber`, `Character.isLetter`, `Character.isWhitespace`, `Character.isASCII`, `Character.isUppercase`, `Character.isLowercase`, `Character.isHexDigit`, `Character.isNewline`, `Character.isPunctuation`, `Character.isSymbol`, `Character.isCurrencySymbol`, `Character.isMathSymbol`, `Character.isWholeNumber`, `Character.hexDigitValue`, `Character.properties`. Use range comparisons (`$0 >= "0" && $0 <= "9"`) or `CharacterSet` instead.
+- `Result<Success, Failure>` (standard library). Define a local enum.
+- Raw string literals `#"..."#`.
+- `@propertyWrapper`, `@dynamicCallable`, `@dynamicMemberLookup` with keypaths.
+- `Dictionary.compactMapValues`.
+- `Sequence.count(where:)`.
+- `String.contains(_ c: Character)` (Swift 5 added this specifically; use `contains(where:)` or `String.firstIndex(of:)`).
+- Custom string-interpolation via `ExpressibleByStringInterpolation` (SE-0228).
+
+The compiler message for these is usually "unable to infer closure type in the current context" or "value of type 'Character' has no member 'X'". Both are tell-tale signs of a Swift 5 API slipping into 4.2 code.
+
+Also unavailable at the deployment target even when the compiler would allow it: `async/await` (Swift 5.5), `actor` (5.5), `@MainActor` (5.5), `Combine` (10.15+), `SwiftUI` (10.15+), `OSLog` 10.14+ APIs.
+
 ## UI copy
 
 Applies to all user-facing strings: labels, hints, placeholders, button titles, tooltips, menu items, dialog messages, status text, error messages. Based on Nielsen Norman Group, Apple HIG, and Material Design practice.
