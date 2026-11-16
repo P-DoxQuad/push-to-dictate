@@ -37,6 +37,7 @@ final class Preferences {
         static let silenceAutoStopThreshold = "silenceAutoStopThreshold"
         static let silenceAutoStopSeconds = "silenceAutoStopSeconds"
         static let typedKeystrokeDelayMs = "typedKeystrokeDelayMs"
+        static let skippedUpdateVersion = "skippedUpdateVersion"
     }
 
     static let noSoundName = "None"
@@ -182,6 +183,11 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.typedKeystrokeDelayMs) }
     }
 
+    var skippedUpdateVersion: String {
+        get { return defaults.string(forKey: Key.skippedUpdateVersion) ?? "" }
+        set { defaults.set(newValue, forKey: Key.skippedUpdateVersion) }
+    }
+
     static var debugRecordingsDirectory: URL {
         return defaultSupportDirectory.appendingPathComponent("debug", isDirectory: true)
     }
@@ -287,7 +293,8 @@ final class Preferences {
         Key.saveDebugRecordings, Key.didAutoSelectModel,
         Key.didShowWelcomeTooltip,
         Key.silenceAutoStopEnabled, Key.silenceAutoStopThreshold,
-        Key.silenceAutoStopSeconds, Key.typedKeystrokeDelayMs
+        Key.silenceAutoStopSeconds, Key.typedKeystrokeDelayMs,
+        Key.skippedUpdateVersion
     ]
 
     // MARK: - Keychain

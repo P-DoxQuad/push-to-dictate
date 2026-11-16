@@ -6,7 +6,7 @@ Runs on CPU. No GPU, Neural Engine, or network connection is used by the local b
 
 ## Version
 
-2026.11.1 (CalVer: `YYYY.MM.PATCH`).
+2026.11.2 (CalVer: `YYYY.MM.PATCH`).
 
 ## Supported platforms
 
@@ -24,6 +24,7 @@ Runs on CPU. No GPU, Neural Engine, or network connection is used by the local b
 - Model catalog with hardware-aware per-model rating.
 - Custom model download via arbitrary `ggml-*.bin` URL.
 - Preferences backup and restore to plist.
+- Manual update check against the GitHub Releases API. User-initiated, no auto-download. Skipping a version is persistent until a newer one appears.
 
 ## Installation
 
@@ -89,7 +90,7 @@ Implemented. Not yet verified end-to-end against a live API key. The multipart u
 
 ## Menu bar menu
 
-Clicking the status-bar icon reveals: Start/Stop Dictation, Mode submenu (Toggle / Push-to-talk), Preferences, Help, About, Quit. Help opens an in-app scrollable window covering permissions, hotkey usage, models, backends, and troubleshooting.
+Clicking the status-bar icon reveals, top to bottom: a disabled status block (active model, thread count for the local backend, activation mode · output method), Start/Stop Dictation with the current hotkey, Mode submenu (Toggle / Push-to-talk), Preferences, Help, About, Grant Accessibility Access (only when permission is missing), Check for Updates, and Quit. Help opens an in-app scrollable window covering permissions, hotkey usage, models, backends, and troubleshooting. When a pending update has been detected, the icon gains a small orange "1" badge and the Check for Updates row bolds to blue.
 
 ## Preferences categories
 

@@ -9,8 +9,16 @@ enum UpdateCheckResult {
 enum UpdateChecker {
     private static let releasesAPIURL =
         URL(string: "https://api.github.com/repos/P-DoxQuad/push-to-dictate/releases/latest")!
+    private static let releasesPageURL =
+        URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases")!
 
     private static let requestTimeout: TimeInterval = 10
+
+    // TEMPORARY: when true, checkForUpdates bypasses the network and returns a
+    // synthetic updateAvailable result so the UI flow can be exercised without
+    // a real newer release on GitHub. Remove before shipping.
+    static let simulateUpdateAvailable = false
+    static let simulatedLatestVersion = "2026.99.0"
 
     static var installedVersion: String {
         let info = Bundle.main.infoDictionary
@@ -19,6 +27,16 @@ enum UpdateChecker {
 
     static func checkForUpdates(completion: @escaping (UpdateCheckResult) -> Void) {
         let current = installedVersion
+
+        if simulateUpdateAvailable {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                completion(.updateAvailable(current: current,
+                                            latest: simulatedLatestVersion,
+                                            releaseURL: releasesPageURL))
+            }
+            return
+        }
+
         var request = URLRequest(url: releasesAPIURL)
         request.timeoutInterval = requestTimeout
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")

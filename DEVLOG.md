@@ -824,3 +824,46 @@ New hidden-by-default menu item "Grant Accessibility Access…" with an `attribu
 #### Welcome popover comment refresh
 
 The 1.2-second deferred show had a comment saying it was timed to avoid overlap with blocking launch-time alerts. With all launch prompts now non-modal or reordered, the delay is only still needed for status-item button layout. Comment updated to reflect this.
+
+### 2026-11-15 — Status menu rework and update attention UI
+
+#### Status rows at the top of the menu
+
+Three disabled `NSMenuItem`s now sit above the Start/Stop row and summarize current config:
+
+- `Model: <stem>` — the local whisper.cpp model filename with `.bin` stripped (e.g. `Model: ggml-base.en-q8_0`). When the backend is OpenAI, this becomes `Model: whisper-1 (OpenAI)` and the Threads row is hidden.
+- `Threads: N` — the number passed as `-t` to `whisper-cli`, pulled from `Preferences.transcriptionThreads`. Hidden for the OpenAI backend since the thread count doesn't apply there.
+- `Behavior: Toggle · Typed` (or `Push-to-talk · Pasted`, etc.) — combines the activation mode and the injection method on one line. Delimiter is a middot.
+
+Refresh happens in `menuNeedsUpdate(_:)`, so switching backend, model, or mode in Preferences shows up the next time the menu is opened. Initial titles are populated at init time so the strings aren't empty before first open.
+
+#### Hotkey next to Start Dictation
+
+The toggle row now reads `Start Dictation  ⌃⌥Space` / `Stop Dictation  ⌃⌥Space` (hotkey rendered via the existing `PreferencesWindowController.describe(keyCode:flags:)` helper the welcome popover already uses). Refreshed both on recording-state transitions and on hotkey preference changes, so rebinding the hotkey updates the menu row without an app relaunch.
+
+#### Update-pending attention indicator
+
+After "Check for Updates…" returns `.updateAvailable`, two things flip:
+
+1. The menu row becomes `Update available: <latest>` with an `attributedTitle` in bold `NSColor.systemBlue`.
+2. The menu-bar icon draws a filled `NSColor.systemOrange` badge in the bottom-left corner with a bold white "1". Badge size 15px, font 11pt bold. Drawn by a new `withUpdateBadge(_:)` helper that composites on top of whatever the icon currently shows (plain / recording dot / processing dot / error tint). Not tied to `IconState`, so it survives across recording transitions.
+
+Both clear automatically if a subsequent manual check returns `.upToDate`. An `.error` result leaves the pending state alone (a transient network failure shouldn't drop a previously-known update).
+
+Position (bottom-left) and size (bigger than the recording/processing dot) were chosen after a quick live-view iteration against a simulate-mode toggle.
+
+#### Skip This Update
+
+The update window gains a third button in the `.updateAvailable` state: `Skip This Update` sits between `Later` (which keeps the badge) and `Open Releases Page` (which deep-links to the release page). Clicking Skip writes the skipped version string to the new `Preferences.skippedUpdateVersion` key and clears the in-session `pendingUpdateVersion`.
+
+Logic on subsequent checks:
+
+- `.updateAvailable(latest)` with `latest == skippedUpdateVersion` → badge stays suppressed. The window still shows the real "Update available" content when the user manually re-checks, so the skip can be reversed by just hitting `Open Releases Page`.
+- `.updateAvailable(latest)` with `latest != skippedUpdateVersion` → a newer version appeared; badge shows normally. Skip is version-specific, not a permanent "never nag me" switch.
+- `.upToDate` → `skippedUpdateVersion` is cleared (tidy-up; nothing left to skip).
+
+Implemented by extending `UpdateCheckWindowController.present` to take two callbacks: `onResult` (existing behavior) and `onSkip(String)` (the skipped version). `StatusItemController` handles both and pokes `Preferences`.
+
+#### Simulation toggle on `UpdateChecker`
+
+New compile-time flag `UpdateChecker.simulateUpdateAvailable` (default `false`) short-circuits the GitHub API call and returns a synthetic `.updateAvailable(current, "2026.99.0", <releases page URL>)` after a 0.4s delay, so the full Check → badge → Skip → re-check loop can be exercised without waiting on a newer release to actually appear upstream. Used during this cycle's UI iteration; left in place behind the flag for future flow testing.

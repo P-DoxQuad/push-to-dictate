@@ -15,6 +15,11 @@ final class StatusItemController: NSObject,
     private var toggleModeItem: NSMenuItem!
     private var pushToTalkModeItem: NSMenuItem!
     private var accessibilityRequestItem: NSMenuItem!
+    private var modelStatusItem: NSMenuItem!
+    private var threadsStatusItem: NSMenuItem!
+    private var behaviorStatusItem: NSMenuItem!
+    private var updatesMenuItem: NSMenuItem!
+    private var pendingUpdateVersion: String?
     private var isRecording = false
 
     private let hotkeyMonitor = HotkeyMonitor()
@@ -41,6 +46,7 @@ final class StatusItemController: NSObject,
         let menu = buildMenu()
         menu.delegate = self
         statusItem.menu = menu
+        refreshStatusRows()
         configureHotkey()
         configureAudio()
         observeAppearanceChanges()
@@ -77,17 +83,55 @@ final class StatusItemController: NSObject,
         let sized = image.copy() as? NSImage ?? image
         sized.size = NSSize(width: 24, height: 24)
 
+        let stateImage: NSImage
         switch iconState {
         case .error:
-            return tintedRed(sized)
+            stateImage = tintedRed(sized)
         case .recording:
-            return dotVisible ? withDot(sized, color: .systemRed) : sized
+            stateImage = dotVisible ? withDot(sized, color: .systemRed) : sized
         case .processing:
             let darkBlue = NSColor(srgbRed: 0.05, green: 0.25, blue: 0.80, alpha: 1.0)
-            return dotVisible ? withDot(sized, color: darkBlue) : sized
+            stateImage = dotVisible ? withDot(sized, color: darkBlue) : sized
         case .idle:
-            return sized
+            stateImage = sized
         }
+
+        if pendingUpdateVersion != nil {
+            return withUpdateBadge(stateImage)
+        }
+        return stateImage
+    }
+
+    private func withUpdateBadge(_ image: NSImage) -> NSImage {
+        let size = image.size
+        let result = NSImage(size: size)
+        result.lockFocus()
+        image.draw(at: .zero, from: NSRect(origin: .zero, size: size),
+                   operation: .sourceOver, fraction: 1.0)
+
+        let badgeSize: CGFloat = 15
+        let badgeRect = NSRect(x: 0,
+                               y: 0,
+                               width: badgeSize, height: badgeSize)
+        NSColor.systemOrange.setFill()
+        NSBezierPath(ovalIn: badgeRect).fill()
+
+        let numeral: NSString = "1"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.boldSystemFont(ofSize: 11)
+        ]
+        let textSize = numeral.size(withAttributes: attrs)
+        let textRect = NSRect(
+            x: badgeRect.midX - textSize.width / 2,
+            y: badgeRect.midY - textSize.height / 2,
+            width: textSize.width,
+            height: textSize.height
+        )
+        numeral.draw(in: textRect, withAttributes: attrs)
+
+        result.unlockFocus()
+        return result
     }
 
     private func withDot(_ image: NSImage, color: NSColor) -> NSImage {
@@ -208,11 +252,26 @@ final class StatusItemController: NSObject,
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
+        modelStatusItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        modelStatusItem.isEnabled = false
+        menu.addItem(modelStatusItem)
+
+        threadsStatusItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        threadsStatusItem.isEnabled = false
+        menu.addItem(threadsStatusItem)
+
+        behaviorStatusItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        behaviorStatusItem.isEnabled = false
+        menu.addItem(behaviorStatusItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         toggleMenuItem = NSMenuItem(title: "Start Dictation",
                                     action: #selector(toggleDictation),
                                     keyEquivalent: "")
         toggleMenuItem.target = self
         menu.addItem(toggleMenuItem)
+        refreshToggleMenuItemTitle()
 
         menu.addItem(NSMenuItem.separator())
 
@@ -268,11 +327,11 @@ final class StatusItemController: NSObject,
         accessibilityRequestItem.isHidden = true
         menu.addItem(accessibilityRequestItem)
 
-        let updates = NSMenuItem(title: "Check for Updates…",
-                                 action: #selector(checkForUpdates),
-                                 keyEquivalent: "")
-        updates.target = self
-        menu.addItem(updates)
+        updatesMenuItem = NSMenuItem(title: "Check for Updates…",
+                                     action: #selector(checkForUpdates),
+                                     keyEquivalent: "")
+        updatesMenuItem.target = self
+        menu.addItem(updatesMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -296,6 +355,17 @@ final class StatusItemController: NSObject,
         hotkeyMonitor.keyCode = prefs.hotkeyKeyCode
         hotkeyMonitor.modifierFlags = prefs.hotkeyModifierFlags
         hotkeyMonitor.mode = (prefs.hotkeyMode == .pushToTalk) ? .pushToTalk : .toggle
+        refreshToggleMenuItemTitle()
+    }
+
+    private func refreshToggleMenuItemTitle() {
+        guard toggleMenuItem != nil else { return }
+        let base = isRecording ? "Stop Dictation" : "Start Dictation"
+        let hotkey = PreferencesWindowController.describe(
+            keyCode: Preferences.shared.hotkeyKeyCode,
+            flags: Preferences.shared.hotkeyModifierFlags
+        )
+        toggleMenuItem.title = "\(base)  \(hotkey)"
     }
 
     private func handleHotkeyActivate() {
@@ -347,7 +417,7 @@ final class StatusItemController: NSObject,
         }
         // When stopping, transcribe() takes over icon state (.processing then
         // .idle on success or .error on failure). Don't overwrite it here.
-        toggleMenuItem.title = isRecording ? "Stop Dictation" : "Start Dictation"
+        refreshToggleMenuItemTitle()
     }
 
     private func configureAutoStop() {
@@ -678,7 +748,49 @@ final class StatusItemController: NSObject,
     }
 
     @objc private func checkForUpdates() {
-        UpdateCheckWindowController.present()
+        UpdateCheckWindowController.present(
+            onResult: { [weak self] result in
+                guard let self = self else { return }
+                let skipped = Preferences.shared.skippedUpdateVersion
+                switch result {
+                case .updateAvailable(_, let latest, _):
+                    self.pendingUpdateVersion = (latest == skipped) ? nil : latest
+                case .upToDate:
+                    self.pendingUpdateVersion = nil
+                    if !skipped.isEmpty {
+                        Preferences.shared.skippedUpdateVersion = ""
+                    }
+                case .error:
+                    break
+                }
+                self.refreshUpdatesMenuItem()
+                self.refreshMenuBarIcon()
+            },
+            onSkip: { [weak self] latest in
+                guard let self = self else { return }
+                Preferences.shared.skippedUpdateVersion = latest
+                self.pendingUpdateVersion = nil
+                self.refreshUpdatesMenuItem()
+                self.refreshMenuBarIcon()
+            }
+        )
+    }
+
+    private func refreshUpdatesMenuItem() {
+        if let latest = pendingUpdateVersion {
+            let title = "Update available: \(latest)"
+            let attributed = NSMutableAttributedString(string: title)
+            attributed.addAttributes(
+                [.foregroundColor: NSColor.systemBlue,
+                 .font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)],
+                range: NSRange(location: 0, length: attributed.length)
+            )
+            updatesMenuItem.attributedTitle = attributed
+            updatesMenuItem.title = title
+        } else {
+            updatesMenuItem.attributedTitle = nil
+            updatesMenuItem.title = "Check for Updates…"
+        }
     }
 
     @objc private func openAccessibilityRequest() {
@@ -694,6 +806,26 @@ final class StatusItemController: NSObject,
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         refreshAccessibilityMenuItem()
+        refreshStatusRows()
+    }
+
+    private func refreshStatusRows() {
+        let prefs = Preferences.shared
+
+        switch prefs.backend {
+        case .whisperCpp:
+            let stem = (prefs.localModelFilename as NSString).deletingPathExtension
+            modelStatusItem.title = "Model: \(stem)"
+            threadsStatusItem.title = "Threads: \(prefs.transcriptionThreads)"
+            threadsStatusItem.isHidden = false
+        case .openAI:
+            modelStatusItem.title = "Model: whisper-1 (OpenAI)"
+            threadsStatusItem.isHidden = true
+        }
+
+        let mode = (prefs.hotkeyMode == .pushToTalk) ? "Push-to-talk" : "Toggle"
+        let method = (prefs.injectionMethod == .typed) ? "Typed" : "Pasted"
+        behaviorStatusItem.title = "Behavior: \(mode) · \(method)"
     }
 
     private func syncModeMenuState() {

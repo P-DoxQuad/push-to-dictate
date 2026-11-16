@@ -6,9 +6,13 @@ final class UpdateCheckWindowController: NSWindowController {
     private let detailLabel = NSTextField(frame: .zero)
     private let spinner = NSProgressIndicator(frame: .zero)
     private let primaryButton = NSButton(frame: .zero)
+    private let tertiaryButton = NSButton(frame: .zero)
     private let secondaryButton = NSButton(frame: .zero)
 
     private var releaseURL: URL?
+    private var latestVersion: String?
+    private var onResult: ((UpdateCheckResult) -> Void)?
+    private var onSkip: ((String) -> Void)?
 
     convenience init() {
         let window = NSWindow(
@@ -24,13 +28,16 @@ final class UpdateCheckWindowController: NSWindowController {
 
     private static var active: UpdateCheckWindowController?
 
-    static func present() {
+    static func present(onResult: ((UpdateCheckResult) -> Void)? = nil,
+                        onSkip: ((String) -> Void)? = nil) {
         if let existing = active {
             existing.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
         let controller = UpdateCheckWindowController()
+        controller.onResult = onResult
+        controller.onSkip = onSkip
         active = controller
         controller.showWindow(nil)
         controller.window?.center()
@@ -75,7 +82,13 @@ final class UpdateCheckWindowController: NSWindowController {
         secondaryButton.action = #selector(closeWindow)
         secondaryButton.isHidden = true
 
-        let buttonRow = NSStackView(views: [secondaryButton, primaryButton])
+        tertiaryButton.bezelStyle = .rounded
+        tertiaryButton.title = "Skip This Update"
+        tertiaryButton.target = self
+        tertiaryButton.action = #selector(skipUpdate)
+        tertiaryButton.isHidden = true
+
+        let buttonRow = NSStackView(views: [secondaryButton, tertiaryButton, primaryButton])
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 10
 
@@ -103,6 +116,7 @@ final class UpdateCheckWindowController: NSWindowController {
     }
 
     private func render(result: UpdateCheckResult) {
+        onResult?(result)
         spinner.stopAnimation(nil)
         spinner.isHidden = true
 
@@ -114,9 +128,11 @@ final class UpdateCheckWindowController: NSWindowController {
             primaryButton.action = #selector(closeWindow)
             primaryButton.isHidden = false
             secondaryButton.isHidden = true
+            tertiaryButton.isHidden = true
 
         case .updateAvailable(let current, let latest, let url):
             releaseURL = url
+            latestVersion = latest
             statusLabel.stringValue = "Update available: \(latest)"
             detailLabel.stringValue = "Installed version: \(current)"
             primaryButton.title = "Open Releases Page"
@@ -125,6 +141,7 @@ final class UpdateCheckWindowController: NSWindowController {
             secondaryButton.title = "Later"
             secondaryButton.action = #selector(closeWindow)
             secondaryButton.isHidden = false
+            tertiaryButton.isHidden = false
 
         case .error(let message):
             statusLabel.stringValue = "Couldn't check for updates."
@@ -133,6 +150,7 @@ final class UpdateCheckWindowController: NSWindowController {
             primaryButton.action = #selector(closeWindow)
             primaryButton.isHidden = false
             secondaryButton.isHidden = true
+            tertiaryButton.isHidden = true
         }
 
         window?.makeFirstResponder(primaryButton)
@@ -141,6 +159,13 @@ final class UpdateCheckWindowController: NSWindowController {
     @objc private func openReleasesPage() {
         if let url = releaseURL {
             NSWorkspace.shared.open(url)
+        }
+        closeWindow()
+    }
+
+    @objc private func skipUpdate() {
+        if let latest = latestVersion {
+            onSkip?(latest)
         }
         closeWindow()
     }
