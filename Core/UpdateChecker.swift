@@ -86,7 +86,7 @@ enum UpdateChecker {
     }
 
     private static func leadingInt<S: StringProtocol>(_ s: S) -> Int {
-        let digits = s.prefix(while: { $0.isNumber })
-        return Int(digits) ?? 0
+        let digits = s.prefix(while: { $0 >= "0" && $0 <= "9" })
+        return Int(String(digits)) ?? 0
     }
 }
