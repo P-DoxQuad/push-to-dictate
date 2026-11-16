@@ -894,3 +894,43 @@ Two of the three status rows at the top of the menu got renamed for clarity:
 `medium.en-q8_0` and `large-v3-turbo-q8_0` are commented out in `ModelCatalog.swift` (not deleted, so the entries can come back later without rewriting). Testing on both the Westmere-era Mac Pro 5,1 host and an M2 Pro Mac Mini (running under Rosetta 2) showed them to be too slow to be practically usable for push-to-dictate's short-dictation use case. If they're unusable on both the oldest supported hardware and a recent Apple-silicon machine, keeping them in the download list is just a trap for users on anything in between.
 
 Active downloadable catalog is now `small.en-q8_0` only. Bundled models (`tiny.en-q8_0`, `base.en-q8_0`) are unchanged. The `.mid` and `.high` `CatalogModel.Tier` cases survive because the commented block still references them; keeping the enum intact avoids churn if the models come back. First-launch auto-pick iterates the active catalog so it correctly picks from what's shipping. Users who already have a medium or large model on disk from a prior install still have it resolved via `whisperModelPath`'s writable-directory lookup — pruning the catalog doesn't delete anything from `~/Library/Application Support/push-to-dictate/models/`, it just removes the Manage Models entries that would offer those filenames as downloads.
+
+### 2026-11-16 — Continuous dictation (experimental)
+
+#### Overview
+
+New opt-in mode where a single recording session produces multiple transcripts instead of one. A short pause in speech (default 0.5 s) is treated as a *chunk boundary* rather than an end-of-utterance: the buffer up to that point is handed off to the transcription queue, the per-chunk buffer is cleared, and recording continues. The user sees text appear in the focused field within a chunk-plus-transcription-time of speaking it, rather than waiting until they toggle dictation off.
+
+Mutually exclusive with silence auto-stop: both watch RMS below a threshold, but one chunks and one ends. Turning either on in Preferences flips the other off (enforced in the Preferences setters; the UI mirrors the state). Push-to-talk mode ignores the continuous setting — continuous makes sense only under toggle-mode semantics.
+
+#### `AudioRecorder` chunk-boundary callback
+
+Added `chunkBoundaryThreshold`, `chunkBoundaryDuration`, and `onChunkBoundary` alongside the existing auto-stop plumbing. Different from auto-stop: this can fire multiple times per recording, and the callback receives the samples-since-last-boundary (not the whole recording). State machine uses `chunkHasSpeech` (arm on speech) + `chunkSilentSince` (clock on silence) so empty-chunk fires during sustained silence are impossible. On boundary: pull-and-clear the per-chunk buffer, reset peak RMS, keep the audio engine running.
+
+Threshold reuses `Preferences.silenceAutoStopThreshold`. "What counts as silence" is one concept; no reason to ask twice.
+
+#### `StatusItemController` pipeline
+
+Serial `DispatchQueue continuousQueue` processes chunks FIFO. Each chunk:
+1. `handleContinuousChunk` runs the min-length filter (0.4 s at 16 kHz = 6400 samples) and enqueues.
+2. `enqueueContinuousChunk` increments a pending counter, constructs a fresh transcriber per chunk, and dispatches a block to the serial queue.
+3. Inside the block, a `DispatchSemaphore` blocks the serial queue on the transcriber's async completion handler to serialize call ordering.
+4. `handleContinuousResult` runs on main, decrements the pending counter, trims whisper's whitespace, appends a trailing space, and injects via `textInjector.insert`.
+
+Final-tail handling: on `setRecording(false)` with continuous active, the samples returned from `audioRecorder.stop()` are enqueued as the last chunk if they pass the min-length and peak-RMS guards. The icon stays `.recording` during continuous capture; on stop, flips to `.processing` if chunks are still draining, then to `.idle` on drain. Starting a fresh recording clears `drainingAfterContinuous` so lingering old chunks don't flip the new session's icon.
+
+#### Trailing-space separator
+
+Each chunk's whisper output is trimmed of leading/trailing whitespace, then a single trailing space is appended before injection. Trailing-space (rather than leading-space-after-first) handles three cases cleanly: separates consecutive chunks within a session, separates chunks across sessions (previous session already left the separator), and leaves the new line empty after a user-pressed Enter mid-session instead of planting a stray leading space on the new line.
+
+#### Beam-size override per-transcriber
+
+`WhisperCppTranscriber` gains `beamSizeOverride: Int?`. The continuous path sets it to 1 before kicking off each chunk: short chunks don't benefit much from higher beam widths, and per-chunk latency dominates the felt experience. Override is per-instance, so one-shot dictation keeps using the user's saved `beamSize` preference. Threads stays shared — it's about CPU utilization, orthogonal to the use case.
+
+#### Preferences UI
+
+Audio pane gains two rows at the bottom: `Continuous:` checkbox and `Pause:` numeric field with hint `seconds · default 0.5 · pause length that cuts a chunk for transcription`. Pause validates in [0.3, 2.0]. Both the continuous and silence-auto-stop checkboxes sync each other's state on change, reflecting the mutual-exclusion already enforced in `Preferences`'s setters.
+
+#### What's deferred
+
+Mid-chunk audio length cap (force a cut if a single chunk grows beyond N seconds of continuous speech), `whisper-server` for model-residency, parallel transcription with sequence-number ordered injection. All discussed; none worth building yet.

@@ -6,6 +6,12 @@ final class WhisperCppTranscriber: Transcriber {
     var modelURL: URL
     var language: String = "en"
 
+    // When non-nil, overrides `Preferences.beamSize` for this transcriber
+    // instance only. Used by continuous dictation to force beam=1 (speed over
+    // accuracy, to keep up with short-chunk throughput) without mutating the
+    // user's saved preference used by one-shot dictation.
+    var beamSizeOverride: Int?
+
     init(executableURL: URL, modelURL: URL) {
         self.executableURL = executableURL
         self.modelURL = modelURL
@@ -84,7 +90,7 @@ final class WhisperCppTranscriber: Transcriber {
         }
 
         let prefs = Preferences.shared
-        let beam = String(prefs.beamSize)
+        let beam = String(beamSizeOverride ?? prefs.beamSize)
         let process = Process()
         process.launchPath = executableURL.path
         process.arguments = [

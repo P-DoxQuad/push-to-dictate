@@ -8,12 +8,22 @@ final class AudioRecorder {
     var onLevel: ((Float) -> Void)?
     var onCaptureSaved: ((URL) -> Void)?
     var onAutoStopTriggered: (() -> Void)?
+    var onChunkBoundary: (([Float]) -> Void)?
 
     // Set to non-nil to enable silence-based auto-stop. Threshold is the RMS
     // floor below which audio counts as silent; duration is how many seconds
     // of continuous silence must elapse before onAutoStopTriggered fires once.
     var autoStopThreshold: Float?
     var autoStopDuration: TimeInterval?
+
+    // Set to non-nil to enable mid-recording chunk boundaries (continuous
+    // dictation). When RMS stays below `chunkBoundaryThreshold` for
+    // `chunkBoundaryDuration` after speech has been seen since the last
+    // boundary, the current buffer is handed to `onChunkBoundary` and
+    // cleared. Recording continues. Multiple boundaries can fire per session.
+    // No boundary fires during sustained silence (prevents empty chunks).
+    var chunkBoundaryThreshold: Float?
+    var chunkBoundaryDuration: TimeInterval?
 
     private(set) var peakRMS: Float = 0
 
@@ -24,6 +34,8 @@ final class AudioRecorder {
     private let bufferQueue = DispatchQueue(label: "push-to-dictate.audio.buffer")
     private var silentSince: Date?
     private var autoStopFired: Bool = false
+    private var chunkHasSpeech: Bool = false
+    private var chunkSilentSince: Date?
 
     func start() throws {
         if engine.isRunning { return }
@@ -31,6 +43,8 @@ final class AudioRecorder {
         peakRMS = 0
         silentSince = nil
         autoStopFired = false
+        chunkHasSpeech = false
+        chunkSilentSince = nil
         try applyPreferredInputDevice()
 
         let inputNode = engine.inputNode
@@ -114,6 +128,20 @@ final class AudioRecorder {
             }
         }
 
+        if let threshold = chunkBoundaryThreshold,
+           let duration = chunkBoundaryDuration {
+            if level >= threshold {
+                chunkHasSpeech = true
+                chunkSilentSince = nil
+            } else if chunkHasSpeech {
+                if chunkSilentSince == nil {
+                    chunkSilentSince = Date()
+                } else if Date().timeIntervalSince(chunkSilentSince!) >= duration {
+                    emitChunk()
+                }
+            }
+        }
+
         let outCapacity = AVAudioFrameCount(
             ceil(Double(pcm.frameLength) * outFormat.sampleRate / pcm.format.sampleRate) + 64
         )
@@ -142,6 +170,21 @@ final class AudioRecorder {
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: count))
         bufferQueue.async { [weak self] in
             self?.buffer.append(contentsOf: samples)
+        }
+    }
+
+    private func emitChunk() {
+        var chunk: [Float] = []
+        bufferQueue.sync {
+            chunk = buffer
+            buffer.removeAll(keepingCapacity: true)
+        }
+        chunkHasSpeech = false
+        chunkSilentSince = nil
+        peakRMS = 0
+        if chunk.isEmpty { return }
+        if let onChunkBoundary = onChunkBoundary {
+            DispatchQueue.main.async { onChunkBoundary(chunk) }
         }
     }
 

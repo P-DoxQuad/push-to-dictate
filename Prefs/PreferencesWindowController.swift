@@ -124,6 +124,13 @@ final class PreferencesWindowController: NSWindowController,
     }()
     private let silenceThresholdField = NSTextField()
     private let silenceSecondsField = NSTextField()
+    private let continuousDictationCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Continuous dictation (Toggle mode only, experimental)"
+        return b
+    }()
+    private let continuousPauseField = NSTextField()
     private let typedDelayField = NSTextField()
     private let typedDelayStepper = NSStepper()
 
@@ -134,6 +141,7 @@ final class PreferencesWindowController: NSWindowController,
     private var typedDelayLabel: NSTextField?
     private var silenceThresholdLabel: NSTextField?
     private var silenceSecondsLabel: NSTextField?
+    private var continuousPauseLabel: NSTextField?
 
     // MARK: - State
 
@@ -271,6 +279,10 @@ final class PreferencesWindowController: NSWindowController,
         silenceAutoStopCheckbox.action = #selector(silenceAutoStopChanged)
         silenceThresholdField.delegate = self
         silenceSecondsField.delegate = self
+
+        continuousDictationCheckbox.target = self
+        continuousDictationCheckbox.action = #selector(continuousDictationChanged)
+        continuousPauseField.delegate = self
 
         typedDelayStepper.minValue = 5
         typedDelayStepper.maxValue = 100
@@ -563,9 +575,21 @@ final class PreferencesWindowController: NSWindowController,
         secondsRow.orientation = .horizontal
         secondsRow.spacing = 8
 
+        continuousPauseField.translatesAutoresizingMaskIntoConstraints = false
+        continuousPauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let pauseHint = NSTextField(frame: .zero)
+        pauseHint.isEditable = false; pauseHint.isSelectable = false
+        pauseHint.isBordered = false; pauseHint.drawsBackground = false
+        pauseHint.textColor = .secondaryLabelColor
+        pauseHint.stringValue = "seconds · default 0.5 · pause length that cuts a chunk for transcription"
+        let pauseRow = NSStackView(views: [continuousPauseField, pauseHint])
+        pauseRow.orientation = .horizontal
+        pauseRow.spacing = 8
+
         let lw = PreferencesWindowController.widestLabelWidth(
             ["Input device:", "Start sound:", "Stop sound:",
-             "Auto-stop:", "Silence threshold:", "Silence duration:"])
+             "Auto-stop:", "Silence threshold:", "Silence duration:",
+             "Continuous:", "Pause:"])
         let after1 = placeRow(labelText: "Input device:", control: inputDevicePopup,
                               in: pane, topAnchor: pane.topAnchor, topConstant: 0, labelWidth: lw)
         let after2 = placeRow(labelText: "Start sound:", control: startSoundPopup,
@@ -585,7 +609,14 @@ final class PreferencesWindowController: NSWindowController,
                                    in: pane, topAnchor: r5.bottom,
                                    topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
         silenceSecondsLabel = r6.label
-        pane.bottomAnchor.constraint(equalTo: r6.bottom).isActive = true
+        let after7 = placeRow(labelText: "Continuous:", control: continuousDictationCheckbox,
+                              in: pane, topAnchor: r6.bottom,
+                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        let r8 = placeRowWithLabel(labelText: "Pause:", control: pauseRow,
+                                   in: pane, topAnchor: after7,
+                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        continuousPauseLabel = r8.label
+        pane.bottomAnchor.constraint(equalTo: r8.bottom).isActive = true
         return pane
     }
 
@@ -758,6 +789,10 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.silenceAutoStopThreshold)
         silenceSecondsField.stringValue = String(format: "%.1f",
             Preferences.shared.silenceAutoStopSeconds)
+        continuousDictationCheckbox.state =
+            Preferences.shared.continuousDictationEnabled ? .on : .off
+        continuousPauseField.stringValue = String(format: "%.1f",
+            Preferences.shared.continuousDictationPauseSeconds)
         let typedDelay = Preferences.shared.typedKeystrokeDelayMs
         typedDelayField.integerValue = typedDelay
         typedDelayStepper.integerValue = typedDelay
@@ -981,6 +1016,17 @@ final class PreferencesWindowController: NSWindowController,
 
     @objc private func silenceAutoStopChanged() {
         Preferences.shared.silenceAutoStopEnabled = (silenceAutoStopCheckbox.state == .on)
+        // Mutual exclusion is enforced in the Preferences setter; reflect the
+        // flip back in the UI so the user sees the other checkbox clear.
+        continuousDictationCheckbox.state =
+            Preferences.shared.continuousDictationEnabled ? .on : .off
+    }
+
+    @objc private func continuousDictationChanged() {
+        Preferences.shared.continuousDictationEnabled =
+            (continuousDictationCheckbox.state == .on)
+        silenceAutoStopCheckbox.state =
+            Preferences.shared.silenceAutoStopEnabled ? .on : .off
     }
 
     @objc private func typedDelayStepperChanged() {
@@ -1245,6 +1291,15 @@ final class PreferencesWindowController: NSWindowController,
                 setNumericFieldValid(field: silenceSecondsField,
                                      label: silenceSecondsLabel, valid: false)
             }
+        case continuousPauseField:
+            if let v = Double(continuousPauseField.stringValue), v >= 0.3, v <= 2.0 {
+                Preferences.shared.continuousDictationPauseSeconds = v
+                setNumericFieldValid(field: continuousPauseField,
+                                     label: continuousPauseLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: continuousPauseField,
+                                     label: continuousPauseLabel, valid: false)
+            }
         default:
             break
         }
@@ -1268,6 +1323,9 @@ final class PreferencesWindowController: NSWindowController,
         case silenceSecondsField:
             guard let v = Double(silenceSecondsField.stringValue) else { return false }
             return v >= 1.2
+        case continuousPauseField:
+            guard let v = Double(continuousPauseField.stringValue) else { return false }
+            return v >= 0.3 && v <= 2.0
         default:
             return true
         }
@@ -1300,6 +1358,11 @@ final class PreferencesWindowController: NSWindowController,
                 Preferences.shared.silenceAutoStopSeconds)
             setNumericFieldValid(field: silenceSecondsField,
                                  label: silenceSecondsLabel, valid: true)
+        case continuousPauseField:
+            continuousPauseField.stringValue = String(format: "%.1f",
+                Preferences.shared.continuousDictationPauseSeconds)
+            setNumericFieldValid(field: continuousPauseField,
+                                 label: continuousPauseLabel, valid: true)
         default:
             break
         }

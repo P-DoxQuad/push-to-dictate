@@ -38,6 +38,8 @@ final class Preferences {
         static let silenceAutoStopSeconds = "silenceAutoStopSeconds"
         static let typedKeystrokeDelayMs = "typedKeystrokeDelayMs"
         static let skippedUpdateVersion = "skippedUpdateVersion"
+        static let continuousDictationEnabled = "continuousDictationEnabled"
+        static let continuousDictationPauseSeconds = "continuousDictationPauseSeconds"
     }
 
     static let noSoundName = "None"
@@ -156,7 +158,30 @@ final class Preferences {
 
     var silenceAutoStopEnabled: Bool {
         get { return defaults.bool(forKey: Key.silenceAutoStopEnabled) }
-        set { defaults.set(newValue, forKey: Key.silenceAutoStopEnabled) }
+        set {
+            defaults.set(newValue, forKey: Key.silenceAutoStopEnabled)
+            if newValue && continuousDictationEnabled {
+                defaults.set(false, forKey: Key.continuousDictationEnabled)
+            }
+        }
+    }
+
+    var continuousDictationEnabled: Bool {
+        get { return defaults.bool(forKey: Key.continuousDictationEnabled) }
+        set {
+            defaults.set(newValue, forKey: Key.continuousDictationEnabled)
+            if newValue && silenceAutoStopEnabled {
+                defaults.set(false, forKey: Key.silenceAutoStopEnabled)
+            }
+        }
+    }
+
+    var continuousDictationPauseSeconds: Double {
+        get {
+            let stored = defaults.double(forKey: Key.continuousDictationPauseSeconds)
+            return stored == 0 ? 0.5 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationPauseSeconds) }
     }
 
     var silenceAutoStopThreshold: Double {
@@ -294,7 +319,8 @@ final class Preferences {
         Key.didShowWelcomeTooltip,
         Key.silenceAutoStopEnabled, Key.silenceAutoStopThreshold,
         Key.silenceAutoStopSeconds, Key.typedKeystrokeDelayMs,
-        Key.skippedUpdateVersion
+        Key.skippedUpdateVersion,
+        Key.continuousDictationEnabled, Key.continuousDictationPauseSeconds
     ]
 
     // MARK: - Keychain

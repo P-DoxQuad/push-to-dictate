@@ -27,6 +27,12 @@ final class StatusItemController: NSObject,
     private let textInjector = TextInjector()
     private var lastLevelLog: Date = .distantPast
 
+    private let continuousQueue = DispatchQueue(
+        label: "push-to-dictate.continuous", qos: .userInitiated)
+    private var pendingContinuousChunks: Int = 0
+    private var drainingAfterContinuous: Bool = false
+    private var continuousModeActive: Bool = false
+
     private enum IconState { case idle, recording, processing, error }
     private var iconState: IconState = .idle
     private var dotVisible = false
@@ -390,7 +396,15 @@ final class StatusItemController: NSObject,
                 showError(title: "Cannot start dictation", detail: issue)
                 return
             }
+            // Any pending chunks from a previous continuous session continue
+            // draining in the background, but don't want their completion to
+            // flip our icon back to .idle while this new session is active.
+            drainingAfterContinuous = false
+            continuousModeActive =
+                hotkeyMonitor.mode == .toggle &&
+                Preferences.shared.continuousDictationEnabled
             configureAutoStop()
+            configureChunkBoundary()
             do {
                 try audioRecorder.start()
             } catch {
@@ -403,7 +417,21 @@ final class StatusItemController: NSObject,
             let samples = audioRecorder.stop()
             let peak = audioRecorder.peakRMS
             playSound(Preferences.shared.stopSound)
-            if peak < StatusItemController.silentPeakThreshold {
+
+            if continuousModeActive {
+                let minSamples = Int(AudioRecorder.targetSampleRate * 0.4)
+                if samples.count >= minSamples
+                    && peak >= StatusItemController.silentPeakThreshold {
+                    enqueueContinuousChunk(samples: samples)
+                }
+                if pendingContinuousChunks > 0 {
+                    drainingAfterContinuous = true
+                    setIconState(.processing)
+                } else {
+                    setIconState(.idle)
+                }
+                continuousModeActive = false
+            } else if peak < StatusItemController.silentPeakThreshold {
                 Logger.info(String(format: "skipping transcription: silent recording (peak RMS %.4f)", peak))
                 setIconState(.idle)
             } else {
@@ -415,8 +443,9 @@ final class StatusItemController: NSObject,
         if recording {
             setIconState(.recording)
         }
-        // When stopping, transcribe() takes over icon state (.processing then
-        // .idle on success or .error on failure). Don't overwrite it here.
+        // When stopping, transcribe() or the continuous branch take over icon
+        // state (.processing then .idle on success or .error on failure).
+        // Don't overwrite it here.
         refreshToggleMenuItemTitle()
     }
 
@@ -433,6 +462,90 @@ final class StatusItemController: NSObject,
             audioRecorder.autoStopThreshold = nil
             audioRecorder.autoStopDuration = nil
             audioRecorder.onAutoStopTriggered = nil
+        }
+    }
+
+    private func configureChunkBoundary() {
+        let prefs = Preferences.shared
+        if continuousModeActive {
+            // Reuse the user's silence RMS threshold. "What counts as silence"
+            // is a single mental model; no reason to ask for it twice.
+            audioRecorder.chunkBoundaryThreshold = Float(prefs.silenceAutoStopThreshold)
+            audioRecorder.chunkBoundaryDuration = prefs.continuousDictationPauseSeconds
+            audioRecorder.onChunkBoundary = { [weak self] samples in
+                self?.handleContinuousChunk(samples)
+            }
+        } else {
+            audioRecorder.chunkBoundaryThreshold = nil
+            audioRecorder.chunkBoundaryDuration = nil
+            audioRecorder.onChunkBoundary = nil
+        }
+    }
+
+    private func handleContinuousChunk(_ samples: [Float]) {
+        // Mid-recording boundary fire. Final-tail chunk is enqueued directly
+        // from setRecording(false) and uses its own length / peak guards.
+        let minSamples = Int(AudioRecorder.targetSampleRate * 0.4)
+        if samples.count < minSamples { return }
+        enqueueContinuousChunk(samples: samples)
+    }
+
+    private func enqueueContinuousChunk(samples: [Float]) {
+        pendingContinuousChunks += 1
+        let transcriber = makeTranscriber()
+        // Force beam=1 for continuous chunks. Short chunks don't benefit much
+        // from higher beam widths and the per-chunk latency dominates the
+        // felt experience. Override is per-instance so single-shot dictation
+        // keeps using the user's saved beamSize preference.
+        if let whisper = transcriber as? WhisperCppTranscriber {
+            whisper.beamSizeOverride = 1
+        }
+        let backendLabel = Preferences.shared.backend.rawValue
+        let startedAt = Date()
+        Logger.info("continuous: transcribing \(samples.count) samples via \(backendLabel)")
+        continuousQueue.async { [weak self] in
+            // Serialize the per-chunk callback so FIFO order is preserved.
+            // The transcriber is async; block the serial queue on its result.
+            let sem = DispatchSemaphore(value: 0)
+            var captured: TranscriberResult?
+            transcriber.transcribe(audio: samples) { result in
+                captured = result
+                sem.signal()
+            }
+            sem.wait()
+            let elapsed = Date().timeIntervalSince(startedAt)
+            DispatchQueue.main.async {
+                self?.handleContinuousResult(captured, elapsed: elapsed)
+            }
+        }
+    }
+
+    private func handleContinuousResult(_ result: TranscriberResult?,
+                                        elapsed: TimeInterval) {
+        pendingContinuousChunks -= 1
+        if let result = result {
+            switch result {
+            case .success(let text):
+                Logger.info(String(format: "continuous transcript (%.2fs): %@",
+                                   elapsed, text))
+                // Trim whisper's inconsistent leading/trailing whitespace,
+                // then append a trailing space. Trailing-space (rather than
+                // leading-space-after-first) separates chunks correctly even
+                // when the user hits Enter mid-session or toggles across
+                // sessions, without leaving a stray space on the new line.
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    textInjector.insert("\(trimmed) ")
+                }
+            case .failure(let error):
+                Logger.error("continuous chunk transcription failed",
+                             detail: String(format: "%.2fs: %@",
+                                            elapsed, error.localizedDescription))
+            }
+        }
+        if drainingAfterContinuous && pendingContinuousChunks == 0 {
+            drainingAfterContinuous = false
+            setIconState(.idle)
         }
     }
 
