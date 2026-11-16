@@ -59,7 +59,7 @@ final class Preferences {
     }
 
     var injectionMethod: InjectionMethod {
-        get { return InjectionMethod(rawValue: defaults.string(forKey: Key.injectionMethod) ?? "") ?? .paste }
+        get { return InjectionMethod(rawValue: defaults.string(forKey: Key.injectionMethod) ?? "") ?? .typed }
         set { defaults.set(newValue.rawValue, forKey: Key.injectionMethod) }
     }
 
@@ -110,7 +110,10 @@ final class Preferences {
     }
 
     var useColoredMenuBarIcon: Bool {
-        get { return defaults.bool(forKey: Key.useColoredMenuBarIcon) }
+        get {
+            if defaults.object(forKey: Key.useColoredMenuBarIcon) == nil { return true }
+            return defaults.bool(forKey: Key.useColoredMenuBarIcon)
+        }
         set { defaults.set(newValue, forKey: Key.useColoredMenuBarIcon) }
     }
 
@@ -130,7 +133,7 @@ final class Preferences {
     var beamSize: Int {
         get {
             let stored = defaults.integer(forKey: Key.beamSize)
-            return stored == 0 ? 5 : stored
+            return stored == 0 ? 3 : stored
         }
         set { defaults.set(newValue, forKey: Key.beamSize) }
     }
@@ -151,10 +154,7 @@ final class Preferences {
     }
 
     var silenceAutoStopEnabled: Bool {
-        get {
-            if defaults.object(forKey: Key.silenceAutoStopEnabled) == nil { return true }
-            return defaults.bool(forKey: Key.silenceAutoStopEnabled)
-        }
+        get { return defaults.bool(forKey: Key.silenceAutoStopEnabled) }
         set { defaults.set(newValue, forKey: Key.silenceAutoStopEnabled) }
     }
 
@@ -169,7 +169,7 @@ final class Preferences {
     var silenceAutoStopSeconds: Double {
         get {
             let stored = defaults.double(forKey: Key.silenceAutoStopSeconds)
-            return stored == 0 ? 4.0 : stored
+            return stored == 0 ? 2.0 : stored
         }
         set { defaults.set(newValue, forKey: Key.silenceAutoStopSeconds) }
     }
