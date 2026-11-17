@@ -1117,3 +1117,21 @@ Significant additions to `defaultCapitalizationFixups` for geographic and person
 - Personal names: Michael, Andy, Dylan, Raymond, Johnson, Jonathan, Derek, Emily, Sarah, Bill, Curtis, Curtiss, Billy, Holly, Laura, Andrew, Tyson, Jenny, Jennifer, Maria, Jane, Marie, Sean, Shawn, Ron, Ronald, Esther, Leo, Leonardo, Leon, Nadia, Larry, Michelle, Matt, Matthew.
 
 New `defaultTextSubstitutions` entries for canonical forms whose embedded period strip mode removes: `("st john's", "St. John's")` and `("st paul", "St. Paul")`.
+
+#### Prompt chain feeds non-stripped form (post-commit refinement)
+
+Observed on testing: in strip mode, whisper's acoustic disambiguation on close word pairs like `an`/`and`, `to`/`too`, `their`/`there` was slipping in cases where it had been correct under non-strip mode. Root cause: the prompt buffer was accumulating the injected (stripped, lowercase) form, so whisper's decoder was reading context like `"i'll be going for about 6 days and should be back on the 21st"` instead of `"I'll be going for about 6 days and should be back on the 21st."`. Mid-chunk periods and sentence-start capitals were being removed from the prompt before whisper ever saw them.
+
+Fix: when strip mode is on, compute a second post-process pass of the raw chunk text with `stripPunctuation: false` and feed that fully-punctuated sentence-case form to `appendToContinuousPromptBuffer`. The user's visible injection still uses the stripped form; only the prompt buffer sees the rich form. Non-strip mode is unchanged (prompt and injection are identical there). Doubles the per-chunk post-process cost in strip mode, which is negligible at these string sizes.
+
+#### `AudioRecorder` max-chunk timer and buffer reset on speech-begin
+
+Lowering `continuousDictationMaxChunkSeconds` to small values (10 s or less) caused whisper to hallucinate heavily and mis-transcribe. Root cause: both `chunkSampleCount` and the audio `buffer` were accumulating from the moment a chunk slot opened (session start or previous emit), regardless of whether any speech had occurred yet. The max-chunk emit was correctly gated on `chunkHasSpeech`, but by the time speech actually arrived, the counter was already loaded with however much pre-speech silence had piled up. At max-chunk=10 s, a 20 s pre-speech silence followed by any speech triggered an immediate emit containing mostly silence; whisper then invented words to fit the audio.
+
+Fix in `AudioRecorder.handleInputBuffer`: when the audio level crosses `chunkBoundaryThreshold` on a chunk with `chunkHasSpeech == false` (the speech-begin transition), reset `chunkSampleCount = 0` synchronously and queue a `bufferQueue.async { buffer.removeAll(keepingCapacity: true) }`. The current pcm callback's samples are still appended via the subsequent `bufferQueue.async` further down in the function; because `bufferQueue` is serial, the clear runs before the append, so the first speech samples are preserved and only the preceding silence is discarded. Preceding-gap timestamps (`previousChunkLastSpeechAt`, `currentChunkFirstSpeechAt`) are untouched; gap still measures silence duration between chunks correctly.
+
+Effects:
+
+- `max_chunk` now measures speech-time (plus within-speech micro-pauses up to the boundary threshold), not wall-clock-from-chunk-slot-start.
+- Low `max_chunk` values (10 s) are usable without hallucinations.
+- Each emitted chunk starts at the first speech sample; whisper no longer sees long leading silence.

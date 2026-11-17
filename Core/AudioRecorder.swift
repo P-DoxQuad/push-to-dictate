@@ -154,8 +154,26 @@ final class AudioRecorder {
         if let threshold = chunkBoundaryThreshold,
            let duration = chunkBoundaryDuration {
             if level >= threshold {
-                if !chunkHasSpeech && currentChunkFirstSpeechAt == nil {
-                    currentChunkFirstSpeechAt = Date()
+                if !chunkHasSpeech {
+                    if currentChunkFirstSpeechAt == nil {
+                        currentChunkFirstSpeechAt = Date()
+                    }
+                    // Speech-begin transition: discard any pre-speech
+                    // silence that accumulated in the buffer since the
+                    // last emit (or session start). Otherwise a long
+                    // pre-speech silence would push chunkSampleCount
+                    // past chunkBoundaryMaxDuration the moment speech
+                    // arrived, emitting a chunk containing mostly
+                    // silence and triggering whisper hallucinations.
+                    // Also reset the sample counter so max-chunk
+                    // duration measures speech+within-speech time, not
+                    // session-silence time. The current pcm's samples
+                    // are appended below; async ordering on bufferQueue
+                    // guarantees the clear runs before them.
+                    bufferQueue.async { [weak self] in
+                        self?.buffer.removeAll(keepingCapacity: true)
+                    }
+                    chunkSampleCount = 0
                 }
                 chunkHasSpeech = true
                 chunkSilentSince = nil
