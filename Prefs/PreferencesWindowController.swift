@@ -138,6 +138,13 @@ final class PreferencesWindowController: NSWindowController,
     }()
     private let continuousPauseField = NSTextField()
     private let continuousMaxChunkField = NSTextField()
+    private let continuousPromptChainCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Feed prior transcript to whisper as context"
+        return b
+    }()
+    private let continuousPromptChainMaxCharsField = NSTextField()
     private let typedDelayField = NSTextField()
     private let typedDelayStepper = NSStepper()
 
@@ -150,6 +157,7 @@ final class PreferencesWindowController: NSWindowController,
     private var silenceSecondsLabel: NSTextField?
     private var continuousPauseLabel: NSTextField?
     private var continuousMaxChunkLabel: NSTextField?
+    private var continuousPromptChainMaxCharsLabel: NSTextField?
 
     // MARK: - State
 
@@ -294,6 +302,9 @@ final class PreferencesWindowController: NSWindowController,
         continuousDictationCheckbox.action = #selector(continuousDictationChanged)
         continuousPauseField.delegate = self
         continuousMaxChunkField.delegate = self
+        continuousPromptChainCheckbox.target = self
+        continuousPromptChainCheckbox.action = #selector(continuousPromptChainChanged)
+        continuousPromptChainMaxCharsField.delegate = self
 
         typedDelayStepper.minValue = 5
         typedDelayStepper.maxValue = 100
@@ -608,10 +619,22 @@ final class PreferencesWindowController: NSWindowController,
         maxChunkRow.orientation = .horizontal
         maxChunkRow.spacing = 8
 
+        continuousPromptChainMaxCharsField.translatesAutoresizingMaskIntoConstraints = false
+        continuousPromptChainMaxCharsField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let promptCharsHint = NSTextField(frame: .zero)
+        promptCharsHint.isEditable = false; promptCharsHint.isSelectable = false
+        promptCharsHint.isBordered = false; promptCharsHint.drawsBackground = false
+        promptCharsHint.textColor = .secondaryLabelColor
+        promptCharsHint.stringValue = "characters · default 200 · min 100 · max 900 · higher = more context, slower"
+        let promptCharsRow = NSStackView(views: [continuousPromptChainMaxCharsField, promptCharsHint])
+        promptCharsRow.orientation = .horizontal
+        promptCharsRow.spacing = 8
+
         let lw = PreferencesWindowController.widestLabelWidth(
             ["Input device:", "Start sound:", "Stop sound:",
              "Auto-stop:", "Silence threshold:", "Silence duration:",
-             "Continuous:", "Pause:", "Max chunk:"])
+             "Continuous:", "Pause:", "Max chunk:",
+             "Prompt chain:", "Max chars:"])
         let after1 = placeRow(labelText: "Input device:", control: inputDevicePopup,
                               in: pane, topAnchor: pane.topAnchor, topConstant: 0, labelWidth: lw)
         let after2 = placeRow(labelText: "Start sound:", control: startSoundPopup,
@@ -642,7 +665,15 @@ final class PreferencesWindowController: NSWindowController,
                                    in: pane, topAnchor: r8.bottom,
                                    topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
         continuousMaxChunkLabel = r9.label
-        pane.bottomAnchor.constraint(equalTo: r9.bottom).isActive = true
+        let after10 = placeRow(labelText: "Prompt chain:",
+                               control: continuousPromptChainCheckbox,
+                               in: pane, topAnchor: r9.bottom,
+                               topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        let r11 = placeRowWithLabel(labelText: "Max chars:", control: promptCharsRow,
+                                    in: pane, topAnchor: after10,
+                                    topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        continuousPromptChainMaxCharsLabel = r11.label
+        pane.bottomAnchor.constraint(equalTo: r11.bottom).isActive = true
         return pane
     }
 
@@ -825,6 +856,10 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.continuousDictationPauseSeconds)
         continuousMaxChunkField.stringValue = String(format: "%.1f",
             Preferences.shared.continuousDictationMaxChunkSeconds)
+        continuousPromptChainCheckbox.state =
+            Preferences.shared.continuousDictationPromptChainEnabled ? .on : .off
+        continuousPromptChainMaxCharsField.integerValue =
+            Preferences.shared.continuousDictationPromptChainMaxChars
         let typedDelay = Preferences.shared.typedKeystrokeDelayMs
         typedDelayField.integerValue = typedDelay
         typedDelayStepper.integerValue = typedDelay
@@ -1059,6 +1094,11 @@ final class PreferencesWindowController: NSWindowController,
             (continuousDictationCheckbox.state == .on)
         silenceAutoStopCheckbox.state =
             Preferences.shared.silenceAutoStopEnabled ? .on : .off
+    }
+
+    @objc private func continuousPromptChainChanged() {
+        Preferences.shared.continuousDictationPromptChainEnabled =
+            (continuousPromptChainCheckbox.state == .on)
     }
 
     @objc private func typedDelayStepperChanged() {
@@ -1351,6 +1391,16 @@ final class PreferencesWindowController: NSWindowController,
                 setNumericFieldValid(field: continuousMaxChunkField,
                                      label: continuousMaxChunkLabel, valid: false)
             }
+        case continuousPromptChainMaxCharsField:
+            if let v = Int(continuousPromptChainMaxCharsField.stringValue),
+               v >= 100, v <= 900 {
+                Preferences.shared.continuousDictationPromptChainMaxChars = v
+                setNumericFieldValid(field: continuousPromptChainMaxCharsField,
+                                     label: continuousPromptChainMaxCharsLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: continuousPromptChainMaxCharsField,
+                                     label: continuousPromptChainMaxCharsLabel, valid: false)
+            }
         default:
             break
         }
@@ -1380,6 +1430,9 @@ final class PreferencesWindowController: NSWindowController,
         case continuousMaxChunkField:
             guard let v = Double(continuousMaxChunkField.stringValue) else { return false }
             return v >= 5.0 && v <= 30.0
+        case continuousPromptChainMaxCharsField:
+            guard let v = Int(continuousPromptChainMaxCharsField.stringValue) else { return false }
+            return v >= 100 && v <= 900
         default:
             return true
         }
@@ -1422,6 +1475,11 @@ final class PreferencesWindowController: NSWindowController,
                 Preferences.shared.continuousDictationMaxChunkSeconds)
             setNumericFieldValid(field: continuousMaxChunkField,
                                  label: continuousMaxChunkLabel, valid: true)
+        case continuousPromptChainMaxCharsField:
+            continuousPromptChainMaxCharsField.integerValue =
+                Preferences.shared.continuousDictationPromptChainMaxChars
+            setNumericFieldValid(field: continuousPromptChainMaxCharsField,
+                                 label: continuousPromptChainMaxCharsLabel, valid: true)
         default:
             break
         }

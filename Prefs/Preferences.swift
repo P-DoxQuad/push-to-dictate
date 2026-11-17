@@ -41,6 +41,8 @@ final class Preferences {
         static let continuousDictationEnabled = "continuousDictationEnabled"
         static let continuousDictationPauseSeconds = "continuousDictationPauseSeconds"
         static let continuousDictationMaxChunkSeconds = "continuousDictationMaxChunkSeconds"
+        static let continuousDictationPromptChainEnabled = "continuousDictationPromptChainEnabled"
+        static let continuousDictationPromptChainMaxChars = "continuousDictationPromptChainMaxChars"
     }
 
     static let noSoundName = "None"
@@ -206,6 +208,99 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.continuousDictationMaxChunkSeconds) }
     }
 
+    var continuousDictationPromptChainEnabled: Bool {
+        get {
+            if defaults.object(forKey: Key.continuousDictationPromptChainEnabled) == nil {
+                return true
+            }
+            return defaults.bool(forKey: Key.continuousDictationPromptChainEnabled)
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationPromptChainEnabled) }
+    }
+
+    var continuousDictationPromptChainMaxChars: Int {
+        get {
+            let stored = defaults.integer(forKey: Key.continuousDictationPromptChainMaxChars)
+            return stored == 0 ? 200 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationPromptChainMaxChars) }
+    }
+
+    // Words / tokens that the post-processing casing normalizer would
+    // fold to lowercase but that should retain a canonical capitalized
+    // form (months, weekdays, tech acronyms, brand names). Applied as
+    // a case-insensitive word-boundary substitution after lowercasing.
+    // Currently returns a hardcoded English-oriented list. To make this
+    // user-editable: back with a UserDefaults key, split a newline-
+    // joined string into entries, fall back to the default list when
+    // the stored value is empty. Call sites do not need to change.
+    var capitalizationFixups: [String] {
+        return Preferences.defaultCapitalizationFixups
+    }
+
+    static let defaultCapitalizationFixups: [String] = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+        "API", "JSON", "XML", "YAML", "HTML", "CSS", "SQL", "HTTP", "HTTPS",
+        "URL", "URI", "SSH", "FTP", "TCP", "UDP", "DNS", "CPU", "GPU", "RAM",
+        "USB", "PDF", "PNG", "JPEG", "GIF", "SVG", "SSD", "HDD",
+        "GitHub", "GitLab", "macOS", "iOS", "iPadOS", "watchOS", "tvOS",
+        "iCloud", "iPhone", "iPad", "iMac", "MacBook",
+        "Monterey", "Ventura", "Sonoma", "Sequoia", "Catalina", "Mojave",
+        "Big Sur", "High Sierra", "El Capitan",
+        "YouTube", "Google", "Apple", "Microsoft", "Linux",
+        "Chrome", "Firefox", "Safari",
+        "Python", "JavaScript", "TypeScript", "Swift", "Node.js", "npm",
+        "USA", "UK", "EU", "UAE",
+        "NASA", "FBI", "CIA", "NATO", "OPEC", "UNESCO", "UNICEF", "NGO", "GDP",
+        "Wi-Fi", "Bluetooth", "Ethernet",
+        "NLP", "LLM", "GPT", "TPU", "CUDA",
+        "OpenGL", "OpenCL", "Vulkan",
+        "Ubuntu", "Debian", "ChromeOS",
+        "AirPods", "HomePod", "AirTag",
+        "Kotlin", "Haskell", "Lua",
+        "Django", "Kubernetes", "TensorFlow", "PyTorch",
+        "MySQL", "PostgreSQL", "MongoDB", "Redis", "SQLite",
+        "McDonald's", "Burger King", "Tim Hortons", "Wendy's", "Harvey's",
+        "Starbucks", "Chipotle", "Taco Bell", "KFC", "Domino's",
+        "Pizza Hut", "Papa John's", "Little Caesars", "Dairy Queen",
+        "Arby's", "Popeyes", "Red Lobster", "Boston Pizza", "Swiss Chalet",
+        "Pizza Pizza", "Jimmy John's", "Panda Express", "Hardee's",
+        "Whataburger", "Culver's", "Panera", "Shake Shack"
+    ]
+
+    // Post-process substitutions where the matched form differs from the
+    // produced form. Covers unit abbreviations (spoken "megabytes" ->
+    // "MB") and multi-word tokenizations that the single-word
+    // capitalization fixup can't catch (whisper's "mac os" -> "macOS").
+    // Patterns are matched case-insensitively with word boundaries.
+    // Order matters: earlier entries run first, so more specific
+    // patterns should precede substrings of themselves. Currently
+    // returns a hardcoded list; same migration path as the
+    // capitalization fixups when it moves to a user-loaded file.
+    var textSubstitutions: [(String, String)] {
+        return Preferences.defaultTextSubstitutions
+    }
+
+    static let defaultTextSubstitutions: [(String, String)] = [
+        ("mac os", "macOS"),
+        ("kilobits per second", "Kbps"),
+        ("megabits per second", "Mbps"),
+        ("gigabits per second", "Gbps"),
+        ("kilobytes", "KB"), ("kilobyte", "KB"),
+        ("megabytes", "MB"), ("megabyte", "MB"),
+        ("gigabytes", "GB"), ("gigabyte", "GB"),
+        ("terabytes", "TB"), ("terabyte", "TB"),
+        ("petabytes", "PB"), ("petabyte", "PB"),
+        ("a and w", "A&W"),
+        ("chick fil a", "Chick-fil-A"),
+        ("chick fill a", "Chick-fil-A"),
+        ("chickfila", "Chick-fil-A"),
+        ("chick filet", "Chick-fil-A"),
+        ("chick fillet", "Chick-fil-A")
+    ]
+
     var silenceAutoStopThreshold: Double {
         get {
             let stored = defaults.double(forKey: Key.silenceAutoStopThreshold)
@@ -364,7 +459,9 @@ final class Preferences {
         Key.silenceAutoStopSeconds, Key.typedKeystrokeDelayMs,
         Key.skippedUpdateVersion,
         Key.continuousDictationEnabled, Key.continuousDictationPauseSeconds,
-        Key.continuousDictationMaxChunkSeconds
+        Key.continuousDictationMaxChunkSeconds,
+        Key.continuousDictationPromptChainEnabled,
+        Key.continuousDictationPromptChainMaxChars
     ]
 
     // MARK: - Keychain
