@@ -835,7 +835,27 @@ final class StatusItemController: NSObject,
                     }
                     textInjector.insert(injected)
                     if prefs.continuousDictationPromptChainEnabled {
-                        appendToContinuousPromptBuffer(injected)
+                        // Feed whisper a non-stripped, fully-punctuated,
+                        // sentence-case form as context, regardless of
+                        // what we injected to the user. The prompt steers
+                        // whisper's language model; richer punctuation
+                        // and capitalization give it stronger signal for
+                        // acoustically-ambiguous word choices (an/and,
+                        // to/too, their/there). Only used for the prompt;
+                        // the user's visible text stays in the chosen
+                        // mode's form.
+                        let promptText: String
+                        if stripMode {
+                            let fullyPunctuated =
+                                StatusItemController.postProcessTranscript(
+                                    text, stripPunctuation: false)
+                            promptText = fullyPunctuated.isEmpty
+                                ? injected
+                                : "\(fullyPunctuated) "
+                        } else {
+                            promptText = injected
+                        }
+                        appendToContinuousPromptBuffer(promptText)
                     }
                 }
             case .failure(let error):
