@@ -37,7 +37,6 @@ final class StatusItemController: NSObject,
     // has language-model context across chunk boundaries. Reset on session
     // start. Capped so the whisper prompt token budget isn't exceeded.
     private var continuousPromptBuffer: String = ""
-    private static let continuousPromptMaxChars: Int = 600
 
     private enum IconState { case idle, recording, processing, error }
     private var iconState: IconState = .idle
@@ -508,7 +507,7 @@ final class StatusItemController: NSObject,
         // per-instance so single-shot dictation keeps using the user's
         // saved beamSize preference.
         if let whisper = transcriber as? WhisperCppTranscriber {
-            whisper.beamSizeOverride = 2
+            whisper.beamSizeOverride = 1
         }
         let backendLabel = Preferences.shared.backend.rawValue
         let startedAt = Date()
@@ -550,7 +549,7 @@ final class StatusItemController: NSObject,
             continuousPromptBuffer.append(" ")
         }
         continuousPromptBuffer.append(text)
-        let max = StatusItemController.continuousPromptMaxChars
+        let max = Preferences.shared.continuousDictationPromptChainMaxChars
         if continuousPromptBuffer.count > max {
             let overflow = continuousPromptBuffer.count - max
             let start = continuousPromptBuffer.index(
@@ -565,8 +564,11 @@ final class StatusItemController: NSObject,
     // rare because the whole recording tends to have speech; in continuous
     // mode the chunk-on-pause flow routinely feeds whisper short low-signal
     // fragments and the tokens show up frequently. Also drops pure-ellipsis
-    // or punctuation-only results that would otherwise inject stray dots.
-    private static func cleanContinuousTranscript(_ text: String) -> String {
+    // or punctuation-only results that would otherwise inject stray dots,
+    // strips trailing ellipses (whisper's way of marking partial speech at
+    // a chunk tail), and normalizes casing to lowercase with capitals only
+    // at sentence starts.
+    private static func postProcessTranscript(_ text: String) -> String {
         var cleaned = text
         let patterns = [
             "\\[[^\\]]*\\]",
@@ -586,12 +588,107 @@ final class StatusItemController: NSObject,
                 in: cleaned, options: [], range: range, withTemplate: " ")
         }
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let ellipsis = try? NSRegularExpression(
+            pattern: "(?:\\.{3,}|…+)\\s*$", options: []) {
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            cleaned = ellipsis.stringByReplacingMatches(
+                in: cleaned, options: [], range: range, withTemplate: "")
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         // Require at least one letter or digit, else treat as empty (drops
         // whisper outputs that boil down to just "..." or similar).
         let hasContent = cleaned.unicodeScalars.contains {
             CharacterSet.alphanumerics.contains($0)
         }
-        return hasContent ? cleaned : ""
+        if !hasContent { return "" }
+        return applyTextSubstitutions(applyCapitalizationFixups(normalizeCasing(cleaned)))
+    }
+
+    // Applies pattern -> replacement substitutions where the matched
+    // form and the produced form differ. Used for unit abbreviations
+    // (spoken "megabytes" -> "MB") and for multi-word whisper tokens
+    // that the single-word capitalization fixup can't handle ("mac os"
+    // -> "macOS"). Case-insensitive, word-boundary matched. List lives
+    // on Preferences so it can be made user-editable without touching
+    // this function.
+    private static func applyTextSubstitutions(_ text: String) -> String {
+        var result = text
+        for (pattern, replacement) in Preferences.shared.textSubstitutions {
+            let escaped = NSRegularExpression.escapedPattern(for: pattern)
+            let regexPattern = "\\b\(escaped)\\b"
+            guard let regex = try? NSRegularExpression(
+                pattern: regexPattern, options: [.caseInsensitive]) else {
+                continue
+            }
+            let range = NSRange(result.startIndex..., in: result)
+            let template = NSRegularExpression.escapedTemplate(for: replacement)
+            result = regex.stringByReplacingMatches(
+                in: result, options: [], range: range, withTemplate: template)
+        }
+        return result
+    }
+
+    // Restores canonical casing for a curated list of proper nouns,
+    // brand names, and acronyms that the lowercase pass folded. Each
+    // entry is matched case-insensitively with word boundaries so
+    // internal letters (e.g. the "us" in "trust") are not disturbed.
+    // The list lives on Preferences so it can be made user-editable
+    // without touching this function.
+    private static func applyCapitalizationFixups(_ text: String) -> String {
+        var result = text
+        for canonical in Preferences.shared.capitalizationFixups {
+            let escaped = NSRegularExpression.escapedPattern(for: canonical)
+            let pattern = "\\b\(escaped)\\b"
+            guard let regex = try? NSRegularExpression(
+                pattern: pattern, options: [.caseInsensitive]) else {
+                continue
+            }
+            let range = NSRange(result.startIndex..., in: result)
+            let template = NSRegularExpression.escapedTemplate(for: canonical)
+            result = regex.stringByReplacingMatches(
+                in: result, options: [], range: range, withTemplate: template)
+        }
+        return result
+    }
+
+    // Lowercases the text, then re-uppercases the first alphabetic
+    // character and any letter following sentence-ending punctuation
+    // (. ! ?) across intervening whitespace. Mid-word punctuation like
+    // commas, apostrophes, and hyphens do not trigger capitalization.
+    // In continuous mode this means the first word of every chunk is
+    // capitalized even when it is a mid-sentence continuation of the
+    // previous chunk; acceptable because pauses long enough to trigger
+    // a chunk boundary usually fall on sentence breaks anyway.
+    private static func normalizeCasing(_ text: String) -> String {
+        let lower = text.lowercased()
+        var result = String()
+        result.reserveCapacity(lower.count)
+        var needsCapital = true
+        for ch in lower {
+            if ch == "." || ch == "!" || ch == "?" {
+                result.append(ch)
+                needsCapital = true
+            } else if ch == " " || ch == "\t" || ch == "\n" {
+                result.append(ch)
+            } else {
+                if needsCapital && ch >= "a" && ch <= "z" {
+                    result.append(String(ch).uppercased())
+                } else {
+                    result.append(ch)
+                }
+                needsCapital = false
+            }
+        }
+        // Re-uppercase the standalone pronoun "i" and its contractions
+        // (i'll, i've, i'm, i'd) which the lowercase pass folded. \b
+        // treats the apostrophe as a word boundary, so \bi\b matches the
+        // "i" in "i'll" but not the "i" inside words like "apply" or "is".
+        if let regex = try? NSRegularExpression(pattern: "\\bi\\b", options: []) {
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(
+                in: result, options: [], range: range, withTemplate: "I")
+        }
+        return result
     }
 
     private func handleContinuousResult(_ result: TranscriberResult?,
@@ -602,13 +699,16 @@ final class StatusItemController: NSObject,
             case .success(let text):
                 Logger.info(String(format: "continuous transcript (%.2fs): %@",
                                    elapsed, text))
-                let cleaned = StatusItemController.cleanContinuousTranscript(text)
+                let cleaned = StatusItemController.postProcessTranscript(text)
                 if !cleaned.isEmpty {
                     // Trailing space (rather than leading-space-after-first)
                     // separates chunks correctly even when the user hits
                     // Enter mid-session or toggles across sessions, without
                     // leaving a stray space on the new line.
                     textInjector.insert("\(cleaned) ")
+                    if Preferences.shared.continuousDictationPromptChainEnabled {
+                        appendToContinuousPromptBuffer(cleaned)
+                    }
                 }
             case .failure(let error):
                 Logger.error("continuous chunk transcription failed",
@@ -703,7 +803,10 @@ final class StatusItemController: NSObject,
                 case .success(let text):
                     Logger.info(String(format: "transcript (%.2fs): %@", elapsed, text))
                     self?.setIconState(.idle)
-                    self?.textInjector.insert(text)
+                    let cleaned = StatusItemController.postProcessTranscript(text)
+                    if !cleaned.isEmpty {
+                        self?.textInjector.insert(cleaned)
+                    }
                 case .failure(let error):
                     let backend = Preferences.shared.backend
                     let title = (backend == .openAI)

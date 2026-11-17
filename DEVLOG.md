@@ -969,4 +969,87 @@ New button in the Advanced pane under a `Preferences:` row label. Calls `Prefere
 
 No confirmation dialog: destructive-action convention is to prompt, but the explicit directive here was that it's unnecessary for a preferences-only reset where no data is lost and the user can just re-tune anything they'd changed.
 
+### 2026-11-16 — Post-processing pipeline, prompt-chain fix, prompt-chain controls
+
+#### `postProcessTranscript` pipeline
+
+`cleanContinuousTranscript` renamed to `postProcessTranscript` and extended. New stages, in order:
+
+1. Bracket/paren annotation strip (unchanged: `[BLANK_AUDIO]`, `(music)`, etc.)
+2. Whitespace collapse (unchanged)
+3. Trim (unchanged)
+4. **Trailing ellipsis strip (new)**: `(?:\.{3,}|…+)\s*$`. Whisper emits ellipses when it catches partial speech at a chunk tail; not useful for straight dictation.
+5. hasContent check (unchanged)
+6. **`normalizeCasing` (new)**
+7. **`applyCapitalizationFixups` (new)**
+8. **`applyTextSubstitutions` (new)**
+
+Now runs on both continuous and single-shot paths. Previously only continuous.
+
+#### `normalizeCasing`
+
+Lowercases the text, then re-uppercases:
+
+- The first alphabetic character.
+- Any letter following `. ! ?`, across intervening whitespace.
+- Standalone `i` and its contractions (`I'll`, `I've`, `I'm`, `I'd`) via a `\bi\b` → `I` regex pass. `\b` treats the apostrophe as a word boundary, so the pattern matches the `i` in `i'll` but not the `i` inside `apply` or `is`.
+
+Mid-word punctuation (commas, apostrophes, hyphens) does not trigger capitalization. In continuous mode the first word of every chunk is capitalized, which is acceptable because pause boundaries usually align with sentence breaks.
+
+Motivation: straight-dictation style where the user controls capitalization through what they actually say, rather than inheriting whisper's variable capitalization bias.
+
+#### `applyCapitalizationFixups`
+
+`Preferences.capitalizationFixups: [String]` (computed, backed by static `defaultCapitalizationFixups`) holds canonical forms the lowercase pass folded. Each entry is matched case-insensitively with word boundaries and replaced with the canonical casing.
+
+Content: months, weekdays, common tech acronyms (API, JSON, XML, YAML, HTML, CSS, SQL, HTTP, HTTPS, URL, URI, SSH, FTP, TCP, UDP, DNS, CPU, GPU, RAM, USB, PDF, PNG, JPEG, GIF, SVG, SSD, HDD), tech brands (GitHub, GitLab, macOS, iOS, iPadOS, watchOS, tvOS, iCloud, iPhone, iPad, iMac, MacBook, YouTube, Google, Apple, Microsoft, Linux, Chrome, Firefox, Safari), macOS version names (Monterey, Ventura, Sonoma, Sequoia, Catalina, Mojave, Big Sur, High Sierra, El Capitan), programming languages (Python, JavaScript, TypeScript, Swift, Node.js, npm, Kotlin, Haskell, Lua), frameworks (Django, Kubernetes, TensorFlow, PyTorch), databases (MySQL, PostgreSQL, MongoDB, Redis, SQLite), country acronyms (USA, UK, EU, UAE), global orgs (NASA, FBI, CIA, NATO, OPEC, UNESCO, UNICEF, NGO, GDP), wireless (Wi-Fi, Bluetooth, Ethernet), AI/ML (NLP, LLM, GPT, TPU, CUDA), graphics APIs (OpenGL, OpenCL, Vulkan), OS distros (Ubuntu, Debian, ChromeOS), Apple products (AirPods, HomePod, AirTag), fast food brands (McDonald's, Burger King, Tim Hortons, Wendy's, Harvey's, Starbucks, Chipotle, Taco Bell, KFC, Domino's, Pizza Hut, Papa John's, Little Caesars, Dairy Queen, Arby's, Popeyes, Red Lobster, Boston Pizza, Swiss Chalet, Pizza Pizza, Jimmy John's, Panda Express, Hardee's, Whataburger, Culver's, Panera, Shake Shack).
+
+Deliberately excluded:
+
+- **Honorifics with trailing periods** (Mr., Mrs., Ms., Dr., Prof.). The embedded period would collide with sentence-boundary logic.
+- **Short ambiguous words** (WHO, Windows, React, Angular, Rails, Flask, Metal, Mac, Go, Rust, Dart, Elixir, Ruby, Python-as-snake, Subway, Olive Garden, Five Guys, Montana's, In-N-Out). Case-insensitive word-boundary matching would overreach into non-brand occurrences.
+- **Storage / frequency units as-abbreviations** (MB, GB, Hz, kHz, MHz, GHz). Whisper spells out "megabytes" / "gigahertz" in prose; the abbreviation form never appears from spoken input.
+
+Structure allows migration to a user-editable file without touching call sites: change the getter body to read from a file path, fall back to the static default when the stored value is empty.
+
+#### `applyTextSubstitutions`
+
+`Preferences.textSubstitutions: [(String, String)]` (computed, backed by static `defaultTextSubstitutions`). Each tuple is `(pattern, replacement)`, applied case-insensitively with word boundaries. Covers cases where match form differs from produced form:
+
+- `mac os` → `macOS`. Whisper tokenizes the brand as two words from some phoneme runs; the single-word capitalization fixup for `macOS` doesn't match.
+- Byte unit expansion: `kilobyte(s)` → `KB`, `megabyte(s)` → `MB`, `gigabyte(s)` → `GB`, `terabyte(s)` → `TB`, `petabyte(s)` → `PB`.
+- Bit rate expansion: `kilobits per second` → `Kbps`, `megabits per second` → `Mbps`, `gigabits per second` → `Gbps`.
+- `a and w` → `A&W`.
+- `Chick-fil-A` variants: `chick fil a`, `chick fill a`, `chickfila`, `chick filet`, `chick fillet` → `Chick-fil-A`.
+
+Hertz family (`hertz`, `kilohertz`, `megahertz`, etc.) deliberately excluded: too aggressive; the abbreviated form would appear in casual prose contexts where the written word is more natural.
+
+Same migration path as fixups.
+
+#### Dead prompt chain fix
+
+`appendToContinuousPromptBuffer(_:)` existed with an implementation, and was conceptually part of the prompt-chaining flow (reset on session start, read when building `--prompt`), **but was never actually called** from `handleContinuousResult`. The buffer stayed empty for every chunk of every session. Added the missing call after each successful injection. Whisper now sees previous chunks' cleaned text as `--prompt` context in the subsequent chunk's invocation.
+
+Visible effect: words that previously came through as acoustic approximations (`son` for JSON, `Russia` for `roughly`, `click note` for `quick note`) resolve correctly once a few prior chunks have established the domain context.
+
+#### Beam override reduced from 2 to 1
+
+`StatusItemController` continuous path now sets `WhisperCppTranscriber.beamSizeOverride = 1`. Short chunks derive minimal accuracy benefit from wider beams; savings are small per chunk but free. Single-shot dictation continues to honor `Preferences.beamSize`.
+
+#### Prompt chain toggle and max-chars preference
+
+Two new preferences:
+
+- `continuousDictationPromptChainEnabled: Bool` (default `true`). Gates the call to `appendToContinuousPromptBuffer`. When off, the buffer stays empty and whisper gets no `--prompt`, which eliminates the per-chunk prompt-encode cost. That cost is small on tiny but perceptible on base; the toggle is the A/B knob.
+- `continuousDictationPromptChainMaxChars: Int` (default 200, range [100, 900]). Rolling buffer character cap. The previously-hardcoded 600 was 2/3 of whisper's ~224-token prompt budget; testing showed 200 chars is enough context to keep continuity across chunks and noticeably reduces the per-chunk latency delta between base and tiny.
+
+`StatusItemController.continuousPromptMaxChars` (hardcoded 600) removed; `appendToContinuousPromptBuffer` reads the cap from the preference.
+
+UI in the Audio pane, below Max chunk:
+
+- `Prompt chain:` checkbox: "Feed prior transcript to whisper as context".
+- `Max chars:` numeric field with hint "characters · default 200 · min 100 · max 900 · higher = more context, slower". Validated inline; red on out-of-range input, reverts to pref on blur if invalid.
+
+Both keys added to `allUserDefaultsKeys` so Reset to Defaults clears them.
+
 After the reset: the button handler also invokes `onHotkeyChanged`/`onColoredIconChanged` callbacks on the controller so the status-bar icon and menu re-pick up the fresh defaults (hotkey binding, colored vs monochrome icon) alongside the Preferences UI re-rendering via `refreshAll`.
