@@ -8,7 +8,11 @@ final class AudioRecorder {
     var onLevel: ((Float) -> Void)?
     var onCaptureSaved: ((URL) -> Void)?
     var onAutoStopTriggered: (() -> Void)?
-    var onChunkBoundary: (([Float]) -> Void)?
+    // Chunk callback receives the captured samples and the preceding gap
+    // (seconds of silence between the previous chunk's last speech sample
+    // and this chunk's first speech sample). Gap is 0 for the first chunk
+    // of a session.
+    var onChunkBoundary: (([Float], TimeInterval) -> Void)?
 
     // Set to non-nil to enable silence-based auto-stop. Threshold is the RMS
     // floor below which audio counts as silent; duration is how many seconds
@@ -45,6 +49,13 @@ final class AudioRecorder {
     private var chunkHasSpeech: Bool = false
     private var chunkSilentSince: Date?
     private var chunkSampleCount: Int = 0
+    // Timestamps for preceding-gap computation. `previousChunkLastSpeechAt`
+    // is captured at emitChunk time (the moment silence first began in the
+    // emitted chunk). `currentChunkFirstSpeechAt` is captured when the next
+    // chunk's first speech-level sample arrives. Their difference is the
+    // silence gap between consecutive chunks.
+    private var previousChunkLastSpeechAt: Date?
+    private var currentChunkFirstSpeechAt: Date?
 
     func start() throws {
         if engine.isRunning { return }
@@ -55,6 +66,8 @@ final class AudioRecorder {
         chunkHasSpeech = false
         chunkSilentSince = nil
         chunkSampleCount = 0
+        previousChunkLastSpeechAt = nil
+        currentChunkFirstSpeechAt = nil
         try applyPreferredInputDevice()
 
         let inputNode = engine.inputNode
@@ -141,6 +154,9 @@ final class AudioRecorder {
         if let threshold = chunkBoundaryThreshold,
            let duration = chunkBoundaryDuration {
             if level >= threshold {
+                if !chunkHasSpeech && currentChunkFirstSpeechAt == nil {
+                    currentChunkFirstSpeechAt = Date()
+                }
                 chunkHasSpeech = true
                 chunkSilentSince = nil
             } else if chunkHasSpeech {
@@ -198,13 +214,28 @@ final class AudioRecorder {
             chunk = buffer
             buffer.removeAll(keepingCapacity: true)
         }
+        // Compute the silence gap preceding this chunk, before resetting
+        // state for the next chunk. Gap is 0 for the first chunk of a
+        // session (no previous chunk to measure against).
+        let gap: TimeInterval
+        if let prevEnd = previousChunkLastSpeechAt,
+           let currStart = currentChunkFirstSpeechAt {
+            gap = currStart.timeIntervalSince(prevEnd)
+        } else {
+            gap = 0
+        }
+        // Remember when this chunk's last speech was so the next chunk
+        // can measure its preceding gap. chunkSilentSince was set when
+        // silence first began after the last speech sample in this chunk.
+        previousChunkLastSpeechAt = chunkSilentSince
+        currentChunkFirstSpeechAt = nil
         chunkHasSpeech = false
         chunkSilentSince = nil
         chunkSampleCount = 0
         peakRMS = 0
         if chunk.isEmpty { return }
         if let onChunkBoundary = onChunkBoundary {
-            DispatchQueue.main.async { onChunkBoundary(chunk) }
+            DispatchQueue.main.async { onChunkBoundary(chunk, gap) }
         }
     }
 

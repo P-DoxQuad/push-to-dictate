@@ -37,6 +37,19 @@ final class StatusItemController: NSObject,
     // has language-model context across chunk boundaries. Reset on session
     // start. Capped so the whisper prompt token budget isn't exceeded.
     private var continuousPromptBuffer: String = ""
+    // True until the first injected chunk of a continuous session. Used
+    // by the leading-separator policy (strip-punctuation mode) to suppress
+    // the prefix on the very first chunk, where no preceding gap exists.
+    private var isFirstContinuousChunk: Bool = true
+    // True iff the most recent injected chunk ended with `?` or `!`. Used
+    // by the leading-separator policy to avoid stacking a `. ` prefix after
+    // a sentence terminator whisper already emitted.
+    private var previousInjectedEndedWithSentencePunct: Bool = false
+    // Monotonic session counter. Each continuous session start increments
+    // it. Chunks capture the session they were enqueued in so late-arriving
+    // results from a prior session can be identified and discarded,
+    // preventing them from corrupting the new session's first-chunk state.
+    private var currentContinuousSessionId: Int = 0
 
     private enum IconState { case idle, recording, processing, error }
     private var iconState: IconState = .idle
@@ -406,6 +419,9 @@ final class StatusItemController: NSObject,
             // flip our icon back to .idle while this new session is active.
             drainingAfterContinuous = false
             continuousPromptBuffer = ""
+            isFirstContinuousChunk = true
+            previousInjectedEndedWithSentencePunct = false
+            currentContinuousSessionId += 1
             continuousModeActive =
                 hotkeyMonitor.mode == .toggle &&
                 Preferences.shared.continuousDictationEnabled
@@ -428,7 +444,8 @@ final class StatusItemController: NSObject,
                 let minSamples = Int(AudioRecorder.targetSampleRate * 0.4)
                 if samples.count >= minSamples
                     && peak >= StatusItemController.silentPeakThreshold {
-                    enqueueContinuousChunk(samples: samples)
+                    // Final tail chunk from session end has no measured gap.
+                    enqueueContinuousChunk(samples: samples, gap: 0)
                 }
                 if pendingContinuousChunks > 0 {
                     drainingAfterContinuous = true
@@ -479,8 +496,8 @@ final class StatusItemController: NSObject,
             audioRecorder.chunkBoundaryThreshold = Float(prefs.silenceAutoStopThreshold)
             audioRecorder.chunkBoundaryDuration = prefs.continuousDictationPauseSeconds
             audioRecorder.chunkBoundaryMaxDuration = prefs.continuousDictationMaxChunkSeconds
-            audioRecorder.onChunkBoundary = { [weak self] samples in
-                self?.handleContinuousChunk(samples)
+            audioRecorder.onChunkBoundary = { [weak self] samples, gap in
+                self?.handleContinuousChunk(samples, gap: gap)
             }
         } else {
             audioRecorder.chunkBoundaryThreshold = nil
@@ -490,15 +507,16 @@ final class StatusItemController: NSObject,
         }
     }
 
-    private func handleContinuousChunk(_ samples: [Float]) {
+    private func handleContinuousChunk(_ samples: [Float], gap: TimeInterval) {
         // Mid-recording boundary fire. Final-tail chunk is enqueued directly
         // from setRecording(false) and uses its own length / peak guards.
         let minSamples = Int(AudioRecorder.targetSampleRate * 0.4)
         if samples.count < minSamples { return }
-        enqueueContinuousChunk(samples: samples)
+        enqueueContinuousChunk(samples: samples, gap: gap)
     }
 
-    private func enqueueContinuousChunk(samples: [Float]) {
+    private func enqueueContinuousChunk(samples: [Float], gap: TimeInterval) {
+        let sessionId = currentContinuousSessionId
         pendingContinuousChunks += 1
         let transcriber = makeTranscriber()
         // Beam=2 for continuous chunks. Compromise between beam=1's speed
@@ -539,7 +557,8 @@ final class StatusItemController: NSObject,
             // Synchronous dispatch so this chunk's text is committed to the
             // prompt buffer before the next serial task starts reading it.
             DispatchQueue.main.sync {
-                self?.handleContinuousResult(captured, elapsed: elapsed)
+                self?.handleContinuousResult(captured, elapsed: elapsed, gap: gap,
+                                             sessionId: sessionId)
             }
         }
     }
@@ -568,11 +587,16 @@ final class StatusItemController: NSObject,
     // strips trailing ellipses (whisper's way of marking partial speech at
     // a chunk tail), and normalizes casing to lowercase with capitals only
     // at sentence starts.
-    private static func postProcessTranscript(_ text: String) -> String {
+    private static func postProcessTranscript(_ text: String,
+                                              stripPunctuation: Bool = false) -> String {
         var cleaned = text
         let patterns = [
             "\\[[^\\]]*\\]",
-            "\\([^\\)]*\\)"
+            "\\([^\\)]*\\)",
+            // Leading angle-bracket artifacts whisper emits on silent or
+            // near-silent chunks (e.g. ">> I" when transcribing a long
+            // silence). Strip them along with any surrounding whitespace.
+            "^\\s*>+\\s*"
         ]
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
@@ -595,13 +619,33 @@ final class StatusItemController: NSObject,
                 in: cleaned, options: [], range: range, withTemplate: "")
             cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        if stripPunctuation {
+            // Strip sentence-ending periods only: a period followed by
+            // whitespace or end-of-string. Periods inside words are
+            // preserved so proper nouns like "whisper.cpp" and "Node.js"
+            // survive. Question marks and exclamation marks are preserved
+            // too: their intonation-driven signal from whisper is kept.
+            if let regex = try? NSRegularExpression(pattern: "\\.+(?=\\s|$)", options: []) {
+                let range = NSRange(cleaned.startIndex..., in: cleaned)
+                cleaned = regex.stringByReplacingMatches(
+                    in: cleaned, options: [], range: range, withTemplate: " ")
+            }
+            if let ws = try? NSRegularExpression(pattern: "\\s+", options: []) {
+                let range = NSRange(cleaned.startIndex..., in: cleaned)
+                cleaned = ws.stringByReplacingMatches(
+                    in: cleaned, options: [], range: range, withTemplate: " ")
+            }
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         // Require at least one letter or digit, else treat as empty (drops
         // whisper outputs that boil down to just "..." or similar).
         let hasContent = cleaned.unicodeScalars.contains {
             CharacterSet.alphanumerics.contains($0)
         }
         if !hasContent { return "" }
-        return applyTextSubstitutions(applyCapitalizationFixups(normalizeCasing(cleaned)))
+        let normalized = normalizeCasing(cleaned,
+                                         capitalizeAtSentenceStarts: !stripPunctuation)
+        return applyTextSubstitutions(applyCapitalizationFixups(normalized))
     }
 
     // Applies pattern -> replacement substitutions where the matched
@@ -659,24 +703,39 @@ final class StatusItemController: NSObject,
     // capitalized even when it is a mid-sentence continuation of the
     // previous chunk; acceptable because pauses long enough to trigger
     // a chunk boundary usually fall on sentence breaks anyway.
-    private static func normalizeCasing(_ text: String) -> String {
-        let lower = text.lowercased()
+    private static func normalizeCasing(_ text: String,
+                                        capitalizeAtSentenceStarts: Bool = true) -> String {
         var result = String()
-        result.reserveCapacity(lower.count)
-        var needsCapital = true
-        for ch in lower {
+        result.reserveCapacity(text.count)
+        // When capitalizeAtSentenceStarts is false (strip-punctuation mode)
+        // the initial state is "don't capitalize"; period-driven
+        // capitalization is also suppressed. Even in strip mode, however,
+        // the alpha character immediately following a `?` or `!` preserves
+        // whisper's original case, so a legitimate next-sentence capital
+        // that whisper emitted inside a chunk is not destroyed.
+        var needsCapital = capitalizeAtSentenceStarts
+        var preserveNextOriginalCase = false
+        for ch in text {
             if ch == "." || ch == "!" || ch == "?" {
                 result.append(ch)
-                needsCapital = true
+                needsCapital = capitalizeAtSentenceStarts
+                preserveNextOriginalCase = (ch == "!" || ch == "?")
             } else if ch == " " || ch == "\t" || ch == "\n" {
                 result.append(ch)
             } else {
-                if needsCapital && ch >= "a" && ch <= "z" {
+                let isUpperAlpha = ch >= "A" && ch <= "Z"
+                let isLowerAlpha = ch >= "a" && ch <= "z"
+                if needsCapital && isLowerAlpha {
                     result.append(String(ch).uppercased())
+                } else if preserveNextOriginalCase {
+                    result.append(ch)
+                } else if isUpperAlpha {
+                    result.append(String(ch).lowercased())
                 } else {
                     result.append(ch)
                 }
                 needsCapital = false
+                preserveNextOriginalCase = false
             }
         }
         // Re-uppercase the standalone pronoun "i" and its contractions
@@ -692,22 +751,91 @@ final class StatusItemController: NSObject,
     }
 
     private func handleContinuousResult(_ result: TranscriberResult?,
-                                        elapsed: TimeInterval) {
+                                        elapsed: TimeInterval,
+                                        gap: TimeInterval,
+                                        sessionId: Int) {
         pendingContinuousChunks -= 1
+        // Stale chunk from a prior session (user stopped and restarted
+        // before this one finished transcribing). Drop it rather than
+        // injecting into the new session, which would corrupt the new
+        // session's first-chunk state and visually plant leftover text
+        // where the user didn't dictate it.
+        let isStale = sessionId != currentContinuousSessionId
+        if isStale {
+            if let result = result, case .success(let text) = result {
+                Logger.info(String(format: "continuous: dropping stale chunk from prior session (%.2fs, gap=%.2fs): %@",
+                                   elapsed, gap, text))
+            }
+            if drainingAfterContinuous && pendingContinuousChunks == 0 {
+                drainingAfterContinuous = false
+                setIconState(.idle)
+            }
+            return
+        }
         if let result = result {
             switch result {
             case .success(let text):
-                Logger.info(String(format: "continuous transcript (%.2fs): %@",
-                                   elapsed, text))
-                let cleaned = StatusItemController.postProcessTranscript(text)
+                Logger.info(String(format: "continuous transcript (%.2fs, gap=%.2fs): %@",
+                                   elapsed, gap, text))
+                let prefs = Preferences.shared
+                let stripMode = prefs.continuousDictationStripWhisperPunctuation
+                var cleaned = StatusItemController.postProcessTranscript(
+                    text, stripPunctuation: stripMode)
                 if !cleaned.isEmpty {
-                    // Trailing space (rather than leading-space-after-first)
-                    // separates chunks correctly even when the user hits
-                    // Enter mid-session or toggles across sessions, without
-                    // leaving a stray space on the new line.
-                    textInjector.insert("\(cleaned) ")
-                    if Preferences.shared.continuousDictationPromptChainEnabled {
-                        appendToContinuousPromptBuffer(cleaned)
+                    let injected: String
+                    if stripMode {
+                        // Leading-separator policy per IDEAS.md. Each chunk
+                        // is injected immediately when transcribed; this is
+                        // what makes it continuous. The separator for the
+                        // CURRENT chunk is decided by the gap preceding it:
+                        // first chunk of session -> no prefix; gap in the
+                        // sentence window -> `". "` + capitalize first
+                        // letter; otherwise -> `" "`. If the previously
+                        // injected chunk already ended with `?` or `!`,
+                        // use just `" "` on a sentence-window chunk so we
+                        // don't stack punctuation. No trailing space.
+                        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let prefix: String
+                        let inSentenceWindow =
+                            gap >= prefs.continuousDictationSentencePauseSeconds
+                            && gap <= prefs.continuousDictationSentencePauseMaxSeconds
+                        // AX query: if the target field's cursor is at a
+                        // line start, treat as fresh start regardless of
+                        // gap. Returns nil when the app doesn't support
+                        // text AX; in that case fall through to the normal
+                        // gap-based logic.
+                        let atLineStart = CursorContext.isCursorAtLineStart()
+                        if isFirstContinuousChunk {
+                            prefix = ""
+                            isFirstContinuousChunk = false
+                            cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                        } else if atLineStart == true {
+                            prefix = ""
+                            cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                        } else if inSentenceWindow {
+                            if previousInjectedEndedWithSentencePunct {
+                                prefix = " "
+                            } else {
+                                prefix = ". "
+                            }
+                            cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                        } else {
+                            prefix = " "
+                        }
+                        injected = prefix + cleaned
+                        if let last = cleaned.last {
+                            previousInjectedEndedWithSentencePunct =
+                                (last == "?" || last == "!")
+                        } else {
+                            previousInjectedEndedWithSentencePunct = false
+                        }
+                    } else {
+                        // Current / stable behavior: trailing space per chunk.
+                        injected = "\(cleaned) "
+                    }
+                    textInjector.insert(injected)
+                    if prefs.continuousDictationPromptChainEnabled {
+                        appendToContinuousPromptBuffer(injected)
                     }
                 }
             case .failure(let error):
@@ -720,6 +848,27 @@ final class StatusItemController: NSObject,
             drainingAfterContinuous = false
             setIconState(.idle)
         }
+    }
+
+    // Uppercases the first alphabetic character of the string, leaving
+    // the rest untouched. Used by strip-punctuation mode to re-cap the
+    // leading letter of a chunk that follows a detected sentence pause.
+    private static func capitalizeFirstAlphabetic(_ text: String) -> String {
+        var result = String()
+        result.reserveCapacity(text.count)
+        var capitalized = false
+        for ch in text {
+            if !capitalized && ch >= "a" && ch <= "z" {
+                result.append(String(ch).uppercased())
+                capitalized = true
+            } else {
+                result.append(ch)
+                if ch >= "A" && ch <= "Z" {
+                    capitalized = true
+                }
+            }
+        }
+        return result
     }
 
     private func preflightBackend() -> String? {

@@ -43,6 +43,9 @@ final class Preferences {
         static let continuousDictationMaxChunkSeconds = "continuousDictationMaxChunkSeconds"
         static let continuousDictationPromptChainEnabled = "continuousDictationPromptChainEnabled"
         static let continuousDictationPromptChainMaxChars = "continuousDictationPromptChainMaxChars"
+        static let continuousDictationStripWhisperPunctuation = "continuousDictationStripWhisperPunctuation"
+        static let continuousDictationSentencePauseSeconds = "continuousDictationSentencePauseSeconds"
+        static let continuousDictationSentencePauseMaxSeconds = "continuousDictationSentencePauseMaxSeconds"
     }
 
     static let noSoundName = "None"
@@ -226,6 +229,27 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.continuousDictationPromptChainMaxChars) }
     }
 
+    var continuousDictationStripWhisperPunctuation: Bool {
+        get { return defaults.bool(forKey: Key.continuousDictationStripWhisperPunctuation) }
+        set { defaults.set(newValue, forKey: Key.continuousDictationStripWhisperPunctuation) }
+    }
+
+    var continuousDictationSentencePauseSeconds: Double {
+        get {
+            let stored = defaults.double(forKey: Key.continuousDictationSentencePauseSeconds)
+            return stored == 0 ? 1.0 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationSentencePauseSeconds) }
+    }
+
+    var continuousDictationSentencePauseMaxSeconds: Double {
+        get {
+            let stored = defaults.double(forKey: Key.continuousDictationSentencePauseMaxSeconds)
+            return stored == 0 ? 2.0 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationSentencePauseMaxSeconds) }
+    }
+
     // Words / tokens that the post-processing casing normalizer would
     // fold to lowercase but that should retain a canonical capitalized
     // form (months, weekdays, tech acronyms, brand names). Applied as
@@ -267,7 +291,42 @@ final class Preferences {
         "Pizza Hut", "Papa John's", "Little Caesars", "Dairy Queen",
         "Arby's", "Popeyes", "Red Lobster", "Boston Pizza", "Swiss Chalet",
         "Pizza Pizza", "Jimmy John's", "Panda Express", "Hardee's",
-        "Whataburger", "Culver's", "Panera", "Shake Shack"
+        "Whataburger", "Culver's", "Panera", "Shake Shack",
+        "Canada", "Ottawa",
+        "Alberta", "British Columbia", "Manitoba", "New Brunswick",
+        "Newfoundland and Labrador", "Nova Scotia", "Ontario",
+        "Prince Edward Island", "Quebec", "Saskatchewan",
+        "Edmonton", "Victoria", "Winnipeg", "Fredericton",
+        "St. John's", "Halifax", "Charlottetown", "Quebec City", "Regina",
+        "Toronto", "Vancouver", "Calgary",
+        "America", "United States", "D.C.", "D.C", "DC",
+        "Alabama", "Alaska", "Arizona", "Arkansas", "California",
+        "Colorado", "Connecticut", "Delaware", "Florida", "Georgia",
+        "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa",
+        "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland",
+        "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri",
+        "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey",
+        "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio",
+        "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina",
+        "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
+        "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
+        "Montgomery", "Juneau", "Phoenix", "Little Rock", "Sacramento",
+        "Denver", "Hartford", "Dover", "Tallahassee", "Atlanta",
+        "Honolulu", "Boise", "Springfield", "Indianapolis", "Des Moines",
+        "Topeka", "Frankfort", "Baton Rouge", "Augusta", "Annapolis",
+        "Boston", "Lansing", "Saint Paul", "St. Paul", "Jackson",
+        "Jefferson City", "Helena", "Lincoln", "Carson City", "Concord",
+        "Trenton", "Santa Fe", "Albany", "Raleigh", "Bismarck",
+        "Columbus", "Oklahoma City", "Salem", "Harrisburg", "Providence",
+        "Columbia", "Pierre", "Nashville", "Austin", "Salt Lake City",
+        "Montpelier", "Richmond", "Olympia", "Charleston", "Madison",
+        "Cheyenne",
+        "Michael", "Andy", "Dylan", "Raymond", "Johnson", "Jonathan",
+        "Derek", "Emily", "Sarah", "Bill", "Curtis", "Curtiss",
+        "Billy", "Holly", "Laura", "Andrew", "Tyson", "Jenny",
+        "Jennifer", "Maria", "Jane", "Marie", "Sean", "Shawn",
+        "Ron", "Ronald", "Esther", "Leo", "Leonardo", "Leon",
+        "Nadia", "Larry", "Michelle", "Matt", "Matthew"
     ]
 
     // Post-process substitutions where the matched form differs from the
@@ -298,7 +357,12 @@ final class Preferences {
         ("chick fill a", "Chick-fil-A"),
         ("chickfila", "Chick-fil-A"),
         ("chick filet", "Chick-fil-A"),
-        ("chick fillet", "Chick-fil-A")
+        ("chick fillet", "Chick-fil-A"),
+        // Strip mode removes the period in "St. John's" / "St. Paul"
+        // before fixups can match. Restore the canonical form via
+        // substitution on the stripped text.
+        ("st john's", "St. John's"),
+        ("st paul", "St. Paul")
     ]
 
     var silenceAutoStopThreshold: Double {
@@ -461,7 +525,10 @@ final class Preferences {
         Key.continuousDictationEnabled, Key.continuousDictationPauseSeconds,
         Key.continuousDictationMaxChunkSeconds,
         Key.continuousDictationPromptChainEnabled,
-        Key.continuousDictationPromptChainMaxChars
+        Key.continuousDictationPromptChainMaxChars,
+        Key.continuousDictationStripWhisperPunctuation,
+        Key.continuousDictationSentencePauseSeconds,
+        Key.continuousDictationSentencePauseMaxSeconds
     ]
 
     // MARK: - Keychain

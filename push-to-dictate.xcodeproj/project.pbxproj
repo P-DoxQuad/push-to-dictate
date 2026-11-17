@@ -36,6 +36,7 @@
 		13743FED30A2D8EB00FAC440 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FE330A2D8EB00FAC440 /* AudioRecorder.swift */; };
 		13743FEE30A2D8EB00FAC440 /* HotkeyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FE430A2D8EB00FAC440 /* HotkeyMonitor.swift */; };
 		13743FEF30A2D8EB00FAC440 /* TextInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13743FE530A2D8EB00FAC440 /* TextInjector.swift */; };
+		A1B2C3DB30B00003000000AA /* CursorContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3DA30B00003000000AA /* CursorContext.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -93,6 +94,7 @@
 		13743FE330A2D8EB00FAC440 /* AudioRecorder.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
 		13743FE430A2D8EB00FAC440 /* HotkeyMonitor.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HotkeyMonitor.swift; sourceTree = "<group>"; };
 		13743FE530A2D8EB00FAC440 /* TextInjector.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TextInjector.swift; sourceTree = "<group>"; };
+		A1B2C3DA30B00003000000AA /* CursorContext.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CursorContext.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -178,6 +180,7 @@
 			children = (
 				136EDB8130A7858700B3EC5B /* Logger.swift */,
 				13743FE330A2D8EB00FAC440 /* AudioRecorder.swift */,
+				A1B2C3DA30B00003000000AA /* CursorContext.swift */,
 				13743FE430A2D8EB00FAC440 /* HotkeyMonitor.swift */,
 				13743FE530A2D8EB00FAC440 /* TextInjector.swift */,
 				A1B2C3D130B00001000000AA /* UpdateChecker.swift */,
@@ -265,6 +268,7 @@
 				13743FEF30A2D8EB00FAC440 /* TextInjector.swift in Sources */,
 				136EDB8F30A8C93F00B3EC5B /* ManageModelsWindowController.swift in Sources */,
 				13743FED30A2D8EB00FAC440 /* AudioRecorder.swift in Sources */,
+				A1B2C3DB30B00003000000AA /* CursorContext.swift in Sources */,
 				13743FEE30A2D8EB00FAC440 /* HotkeyMonitor.swift in Sources */,
 				13743FEA30A2D8EB00FAC440 /* OpenAITranscriber.swift in Sources */,
 				13743FEC30A2D8EB00FAC440 /* WhisperCppTranscriber.swift in Sources */,

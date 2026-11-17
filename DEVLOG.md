@@ -1053,3 +1053,67 @@ UI in the Audio pane, below Max chunk:
 Both keys added to `allUserDefaultsKeys` so Reset to Defaults clears them.
 
 After the reset: the button handler also invokes `onHotkeyChanged`/`onColoredIconChanged` callbacks on the controller so the status-bar icon and menu re-pick up the fresh defaults (hotkey binding, colored vs monochrome icon) alongside the Preferences UI re-rendering via `refreshAll`.
+
+### 2026-11-17 — Experimental: strip-punctuation continuous mode with pause-driven sentences
+
+Branch: `experiment/pause-driven-sentences`. All behavior changes are gated behind a new `continuousDictationStripWhisperPunctuation` preference (default `false`), so existing continuous-mode behavior is preserved unless the user opts in.
+
+#### Design
+
+Treat whisper's punctuation and capitalization output on short chunks as unreliable. Strip sentence-ending periods, lowercase everything, drive sentence-break decisions from measured silence gaps between chunks rather than from whisper's internal guesses. Insert `". "` + capitalize at a user-tunable sentence-pause window; plain `" "` otherwise. Each chunk is injected immediately when transcribed (no staging, no cross-chunk delay) so continuous mode stays actually continuous.
+
+#### `postProcessTranscript` strip mode
+
+New `stripPunctuation: Bool` parameter. When true:
+
+- Strip sentence-ending periods matching `\.+(?=\s|$)`. Periods inside words (`whisper.cpp`, `Node.js`, `D.C.` mid-sentence) are preserved; only periods followed by whitespace or end-of-string get replaced with a space.
+- `normalizeCasing` is called with `capitalizeAtSentenceStarts: false`. It lowercases everything except the alpha character immediately following `?` or `!`, which keeps whisper's original case. This preserves legitimate sentence-break capitals whisper emits on intonation that the pause-driven policy can't reconstruct.
+
+#### Leading angle-bracket artifact strip
+
+Added `^\s*>+\s*` to the per-chunk strip patterns alongside existing bracket/paren removal. Whisper emits `>> ` prefixes on silent or near-silent chunks (seen alongside `[silence]` tokens).
+
+#### `AudioRecorder` gap telemetry
+
+`onChunkBoundary` signature extended from `([Float]) -> Void` to `([Float], TimeInterval) -> Void`. Two new internal timestamps (`previousChunkLastSpeechAt`, `currentChunkFirstSpeechAt`) record when the previous chunk's last speech-level sample fell and when the current chunk's first speech sample arrived. Their difference is the preceding gap, passed through on each emit. Gap is 0 for the first chunk of a session and for final-tail chunks enqueued via `setRecording(false)`.
+
+#### Session ID for stale-chunk drop
+
+New `currentContinuousSessionId: Int` monotonic counter, incremented on each session start. `enqueueContinuousChunk` captures the ID at enqueue time; `handleContinuousResult` checks it against the current ID. Chunks from a prior session are dropped with a log line rather than injected. Prevents late-arriving chunks from corrupting the new session's first-chunk state when the user stops and immediately restarts continuous mode.
+
+#### Leading-separator policy in `handleContinuousResult`
+
+Strip-mode branch applies a prefix to each chunk's cleaned text based on the measured preceding gap:
+
+- First chunk of session: `""` prefix, capitalize first letter.
+- `CursorContext.isCursorAtLineStart()` returns `true`: `""` prefix, capitalize first letter.
+- Gap in `[continuousDictationSentencePauseSeconds, continuousDictationSentencePauseMaxSeconds]`: `". "` prefix (or `" "` if the previously injected chunk ended with `?` or `!`), capitalize first letter.
+- Otherwise: `" "` prefix, no capitalization change.
+
+Nothing is injected with a trailing separator in strip mode. State tracked across chunks: `isFirstContinuousChunk`, `previousInjectedEndedWithSentencePunct`.
+
+#### `CursorContext` via Accessibility API
+
+New file `Core/CursorContext.swift`. Queries `AXUIElementCreateSystemWide()` → `kAXFocusedUIElementAttribute` → `kAXSelectedTextRangeAttribute` and `kAXValueAttribute` to determine whether the cursor in the focused text control is at a line start (position 0, or immediately after `\n`, `\r`, U+2028, or U+2029). Returns `Bool?`: `true` or `false` when AX answered, `nil` when any step failed (no focused element, element isn't a text container, value isn't a string, cursor range not available).
+
+Used in strip mode to force a fresh-start prefix (`""` + capitalize) when the cursor is on a new line after the user pressed Enter mid-session. Uses the existing Accessibility permission granted for the hotkey event tap. Not every app supports AX text access; the `nil` return falls through to the normal gap-based logic so the feature is additive.
+
+#### New preferences
+
+- `continuousDictationStripWhisperPunctuation: Bool` (default `false`): master switch for the strip-mode behavior. When off, continuous mode uses the existing trailing-space injection path.
+- `continuousDictationSentencePauseSeconds: Double` (default `1.0`): lower bound of the sentence-break window. Range gated above `continuousDictationPauseSeconds`, below the max field, capped at `5.0`.
+- `continuousDictationSentencePauseMaxSeconds: Double` (default `2.0`): upper bound. Range gated above the min field, capped at `10.0`. Gaps longer than this are treated as think-pauses, not sentence breaks.
+
+All three added to `allUserDefaultsKeys` so `Reset to Defaults` clears them.
+
+UI: three new rows in the Audio pane under the existing Max chars field: `Strip punctuation:` checkbox, `Sentence pause min:` and `Sentence pause max:` numeric fields with inline validation (red text on out-of-range, revert-to-pref on blur).
+
+#### Fixup list expansion
+
+Significant additions to `defaultCapitalizationFixups` for geographic and personal-name coverage:
+
+- Canada: all 10 provinces, all 10 provincial capitals (Edmonton, Victoria, Winnipeg, Fredericton, St. John's, Halifax, Charlottetown, Quebec City, Regina, Toronto), plus Vancouver, Calgary, Ottawa.
+- United States: all 50 states, all 50 state capitals (Saint Paul, St. Paul, Jefferson City, Carson City, Oklahoma City, Salt Lake City, etc.), plus America, United States, D.C., D.C, DC.
+- Personal names: Michael, Andy, Dylan, Raymond, Johnson, Jonathan, Derek, Emily, Sarah, Bill, Curtis, Curtiss, Billy, Holly, Laura, Andrew, Tyson, Jenny, Jennifer, Maria, Jane, Marie, Sean, Shawn, Ron, Ronald, Esther, Leo, Leonardo, Leon, Nadia, Larry, Michelle, Matt, Matthew.
+
+New `defaultTextSubstitutions` entries for canonical forms whose embedded period strip mode removes: `("st john's", "St. John's")` and `("st paul", "St. Paul")`.
