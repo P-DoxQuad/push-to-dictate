@@ -50,6 +50,11 @@ final class StatusItemController: NSObject,
     // results from a prior session can be identified and discarded,
     // preventing them from corrupting the new session's first-chunk state.
     private var currentContinuousSessionId: Int = 0
+    // Strip-punctuation mode: pending trailing-period injection. Scheduled
+    // after each injected chunk; cancelled when a subsequent chunk arrives
+    // or the session restarts. Fires only when the user falls fully silent
+    // past the configured threshold.
+    private var trailingPeriodWorkItem: DispatchWorkItem?
 
     private enum IconState { case idle, recording, processing, error }
     private var iconState: IconState = .idle
@@ -421,6 +426,8 @@ final class StatusItemController: NSObject,
             continuousPromptBuffer = ""
             isFirstContinuousChunk = true
             previousInjectedEndedWithSentencePunct = false
+            trailingPeriodWorkItem?.cancel()
+            trailingPeriodWorkItem = nil
             currentContinuousSessionId += 1
             continuousModeActive =
                 hotkeyMonitor.mode == .toggle &&
@@ -499,11 +506,24 @@ final class StatusItemController: NSObject,
             audioRecorder.onChunkBoundary = { [weak self] samples, gap in
                 self?.handleContinuousChunk(samples, gap: gap)
             }
+            // Cancel the trailing-period timer the moment speech resumes,
+            // rather than when the next chunk finishes transcribing. Without
+            // this, a user who resumes talking within trailingPeriodSeconds
+            // still gets a period planted before their next chunk lands,
+            // because the timer counts wall-clock time from the previous
+            // injection regardless of incoming audio.
+            audioRecorder.onSpeechBegin = { [weak self] in
+                DispatchQueue.main.async {
+                    self?.trailingPeriodWorkItem?.cancel()
+                    self?.trailingPeriodWorkItem = nil
+                }
+            }
         } else {
             audioRecorder.chunkBoundaryThreshold = nil
             audioRecorder.chunkBoundaryDuration = nil
             audioRecorder.chunkBoundaryMaxDuration = nil
             audioRecorder.onChunkBoundary = nil
+            audioRecorder.onSpeechBegin = nil
         }
     }
 
@@ -575,6 +595,48 @@ final class StatusItemController: NSObject,
                 continuousPromptBuffer.startIndex, offsetBy: overflow)
             continuousPromptBuffer = String(continuousPromptBuffer[start...])
         }
+    }
+
+    // Strip-mode trailing-period: appends "." to the existing prompt
+    // buffer tail without a word-separator, after trimming any trailing
+    // whitespace, so whisper's context sees "lastWord." as the sentence
+    // close rather than "lastWord .".
+    private func appendPeriodToContinuousPromptBuffer() {
+        while let last = continuousPromptBuffer.last,
+              last == " " || last == "\t" || last == "\n" {
+            continuousPromptBuffer.removeLast()
+        }
+        if continuousPromptBuffer.isEmpty { return }
+        continuousPromptBuffer.append(".")
+        let max = Preferences.shared.continuousDictationPromptChainMaxChars
+        if continuousPromptBuffer.count > max {
+            let overflow = continuousPromptBuffer.count - max
+            let start = continuousPromptBuffer.index(
+                continuousPromptBuffer.startIndex, offsetBy: overflow)
+            continuousPromptBuffer = String(continuousPromptBuffer[start...])
+        }
+    }
+
+    private func scheduleTrailingPeriod() {
+        // Trailing-period threshold is derived as 4x the sentence-pause
+        // knob, so the single pref drives the whole timing model
+        // ([P, 2P] window, 4P trailing).
+        let seconds = Preferences.shared.continuousDictationSentencePauseSeconds * 4
+        if seconds <= 0 { return }
+        let sessionId = currentContinuousSessionId
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            if sessionId != self.currentContinuousSessionId { return }
+            self.textInjector.insert(".")
+            self.previousInjectedEndedWithSentencePunct = true
+            if Preferences.shared.continuousDictationPromptChainEnabled {
+                self.appendPeriodToContinuousPromptBuffer()
+            }
+            self.trailingPeriodWorkItem = nil
+            Logger.info("continuous: trailing period injected (silence > \(seconds)s)")
+        }
+        trailingPeriodWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
     }
 
     // Removes whisper's non-speech annotation tokens that leak into the
@@ -772,6 +834,11 @@ final class StatusItemController: NSObject,
             }
             return
         }
+        // New chunk is landing: cancel any pending trailing-period that was
+        // armed by the previous chunk. If this chunk itself warrants one,
+        // we re-arm at the bottom of the strip-mode branch.
+        trailingPeriodWorkItem?.cancel()
+        trailingPeriodWorkItem = nil
         if let result = result {
             switch result {
             case .success(let text):
@@ -784,27 +851,32 @@ final class StatusItemController: NSObject,
                 if !cleaned.isEmpty {
                     let injected: String
                     if stripMode {
-                        // Leading-separator policy per IDEAS.md. Each chunk
-                        // is injected immediately when transcribed; this is
-                        // what makes it continuous. The separator for the
-                        // CURRENT chunk is decided by the gap preceding it:
-                        // first chunk of session -> no prefix; gap in the
-                        // sentence window -> `". "` + capitalize first
-                        // letter; otherwise -> `" "`. If the previously
-                        // injected chunk already ended with `?` or `!`,
-                        // use just `" "` on a sentence-window chunk so we
-                        // don't stack punctuation. No trailing space.
+                        // Leading-separator policy per IDEAS.md. Each
+                        // chunk is injected immediately when transcribed.
+                        // Sentence-break logic has two mechanisms; they
+                        // coexist regardless of auto-end-period state:
+                        //
+                        // Gap-based: chunk arriving with gap in the
+                        // new-sentence window [P, 2P] where P =
+                        // sentencePauseSeconds. Prefix is `". "` +
+                        // capital. Outside the window (gap < P or gap
+                        // > 2P) is just `" "` continuation.
+                        //
+                        // Trailing-period timer: when auto-end-period is
+                        // ON, a timer fires after 4P of silence from
+                        // speech-end and injects `.`. Subsequent chunks
+                        // observe `previousInjectedEndedWithSentencePunct`
+                        // and prefix `" "` + capital.
                         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
                         let prefix: String
-                        let inSentenceWindow =
-                            gap >= prefs.continuousDictationSentencePauseSeconds
-                            && gap <= prefs.continuousDictationSentencePauseMaxSeconds
                         // AX query: if the target field's cursor is at a
-                        // line start, treat as fresh start regardless of
-                        // gap. Returns nil when the app doesn't support
-                        // text AX; in that case fall through to the normal
-                        // gap-based logic.
+                        // line start, treat as fresh start. Returns nil
+                        // when the app doesn't support text AX; fall
+                        // through to the normal logic in that case.
                         let atLineStart = CursorContext.isCursorAtLineStart()
+                        let pauseSeconds = prefs.continuousDictationSentencePauseSeconds
+                        let gapIsSentenceBreak =
+                            gap >= pauseSeconds && gap <= (pauseSeconds * 2)
                         if isFirstContinuousChunk {
                             prefix = ""
                             isFirstContinuousChunk = false
@@ -812,12 +884,15 @@ final class StatusItemController: NSObject,
                         } else if atLineStart == true {
                             prefix = ""
                             cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
-                        } else if inSentenceWindow {
-                            if previousInjectedEndedWithSentencePunct {
-                                prefix = " "
-                            } else {
-                                prefix = ". "
-                            }
+                        } else if previousInjectedEndedWithSentencePunct {
+                            // Prior injection already ended with `.`/`?`/`!`
+                            // (whisper's own, or the trailing-period timer
+                            // firing). Never stack punctuation; always
+                            // capitalize because a new sentence is starting.
+                            prefix = " "
+                            cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                        } else if gapIsSentenceBreak {
+                            prefix = ". "
                             cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
                         } else {
                             prefix = " "
@@ -856,6 +931,27 @@ final class StatusItemController: NSObject,
                             promptText = injected
                         }
                         appendToContinuousPromptBuffer(promptText)
+                    }
+                    // Arm the trailing-period timer. If the user stays
+                    // silent past trailingPeriodSeconds, a `.` is
+                    // appended to close the sentence. Strip mode +
+                    // auto-end-period only; skipped if the chunk already
+                    // ended with sentence-terminating punctuation, and
+                    // skipped if the user is currently still speaking
+                    // (this chunk was a max-chunk force-emit mid-speech,
+                    // not an actual pause).
+                    if stripMode
+                        && prefs.continuousDictationAutoEndPeriod
+                        && !audioRecorder.isSpeaking {
+                        let endsTerminal: Bool
+                        if let last = cleaned.last {
+                            endsTerminal = (last == "." || last == "?" || last == "!")
+                        } else {
+                            endsTerminal = false
+                        }
+                        if !endsTerminal {
+                            scheduleTrailingPeriod()
+                        }
                     }
                 }
             case .failure(let error):

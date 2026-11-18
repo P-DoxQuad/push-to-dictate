@@ -13,6 +13,13 @@ final class AudioRecorder {
     // and this chunk's first speech sample). Gap is 0 for the first chunk
     // of a session.
     var onChunkBoundary: (([Float], TimeInterval) -> Void)?
+    // Fires on the audio thread each time RMS crosses the chunk-boundary
+    // threshold from below (speech-begin transition), including the first
+    // speech of a chunk and every resumption after mid-chunk silence.
+    // Used by StatusItemController to pre-emptively cancel the pending
+    // trailing-period timer the moment the user starts speaking again,
+    // rather than waiting for the next chunk to finish transcribing.
+    var onSpeechBegin: (() -> Void)?
 
     // Set to non-nil to enable silence-based auto-stop. Threshold is the RMS
     // floor below which audio counts as silent; duration is how many seconds
@@ -38,6 +45,13 @@ final class AudioRecorder {
     var chunkBoundaryMaxDuration: TimeInterval?
 
     private(set) var peakRMS: Float = 0
+
+    // True iff speech has been detected in the current chunk slot and no
+    // emit has reset the flag yet. Writes happen on the audio thread;
+    // single-Bool reads from any thread are safe in practice. Used by
+    // StatusItemController to suppress scheduling the trailing-period
+    // timer when a chunk was force-emitted mid-speech (max-chunk cap).
+    var isSpeaking: Bool { return chunkHasSpeech }
 
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
@@ -174,6 +188,7 @@ final class AudioRecorder {
                         self?.buffer.removeAll(keepingCapacity: true)
                     }
                     chunkSampleCount = 0
+                    onSpeechBegin?()
                 }
                 chunkHasSpeech = true
                 chunkSilentSince = nil

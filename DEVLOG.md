@@ -1135,3 +1135,27 @@ Effects:
 - `max_chunk` now measures speech-time (plus within-speech micro-pauses up to the boundary threshold), not wall-clock-from-chunk-slot-start.
 - Low `max_chunk` values (10 s) are usable without hallucinations.
 - Each emitted chunk starts at the first speech sample; whisper no longer sees long leading silence.
+
+#### Sentence timing consolidation and auto-close toggle (post-commit refinement)
+
+The three timing preferences introduced with the strip-punctuation branch collapsed into a single master knob. Only `continuousDictationSentencePauseSeconds` (default `1.0`) remains; `continuousDictationSentencePauseMaxSeconds` and `continuousDictationTrailingPeriodSeconds` were removed. The derived values live in code as `P * 2` (window close) and `P * 4` (trailing-period threshold).
+
+Timing model (P = `sentencePauseSeconds`):
+
+- Gap in `[P, 2P]`: `". "` prefix + capitalize. Natural sentence pause.
+- Gap outside the window: `" "` continuation.
+- Silence ≥ `4P` from speech-end with no new chunk: trailing-period timer fires, injects `.`.
+
+New preference `continuousDictationAutoEndPeriod: Bool` (default `true`) governs whether the trailing-period timer fires at all. Both states of the toggle use the same gap-based `[P, 2P]` window for mid-dictation sentence breaks; only the end-of-dictation closing period is toggle-gated.
+
+`AudioRecorder.onSpeechBegin: (() -> Void)?` added. Fires on the speech-begin transition inside `handleInputBuffer` (same point as the buffer and `chunkSampleCount` reset). `StatusItemController` wires it in `configureChunkBoundary` to cancel the pending trailing-period `DispatchWorkItem` the moment speech resumes, rather than waiting for the next chunk to finish transcribing. Without this, the period could plant itself mid-resumption because the timer was counting wall-clock from the previous injection, not from the actual last speech sample.
+
+`AudioRecorder.isSpeaking: Bool` computed property exposes `chunkHasSpeech`. Checked before arming the trailing-period timer in `scheduleTrailingPeriod`'s caller: if the user is currently in active speech, don't schedule. Handles the max-chunk force-emit case where a chunk is emitted at the duration cap while the user is still speaking continuously; no speech-end has actually occurred, so there's no "trailing" silence to count.
+
+UI collapse in the Audio pane: `Sentence pause min:` and `Sentence pause max:` rows removed. Replaced by one `Sentence pause:` row and an `Auto-close:` checkbox (checkbox title: `Append period to close the final sentence after silence`). Field range gated at `(continuousDictationPauseSeconds, 5.0]`. The hint line under the field renders live as `seconds · default 1.0 · new-sentence window [P, 2P] · trailing period at 4P` with numeric substitution so the user sees the derived values as they adjust the knob.
+
+#### System default input device resolution
+
+`AudioRecorder.applyPreferredInputDevice` previously short-circuited when `Preferences.inputDeviceUID` was empty (the "Default" case), on the assumption that `AVAudioEngine.inputNode` would follow the system default input. It doesn't: the input node retains whatever device was last pinned on its audio unit via `kAudioOutputUnitProperty_CurrentDevice`. After the user picked a specific device once, switching back to "Default" in Preferences left the previously-pinned device stuck. The engine also doesn't follow a System Preferences default-input change made mid-process.
+
+Fix: when the UID is empty, actively resolve the current system default via `AudioObjectGetPropertyData` with `kAudioHardwarePropertyDefaultInputDevice`, then set it on the input node's audio unit using the same path as the explicit-UID branch. New private helper `systemDefaultInputDeviceID() -> AudioDeviceID?`. "Default" now means "the current system default at the moment `start()` is called," which matches what the UI label implies.
