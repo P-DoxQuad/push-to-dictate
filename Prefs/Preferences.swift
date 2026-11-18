@@ -44,8 +44,8 @@ final class Preferences {
         static let continuousDictationPromptChainEnabled = "continuousDictationPromptChainEnabled"
         static let continuousDictationPromptChainMaxChars = "continuousDictationPromptChainMaxChars"
         static let continuousDictationStripWhisperPunctuation = "continuousDictationStripWhisperPunctuation"
+        static let continuousDictationAutoEndPeriod = "continuousDictationAutoEndPeriod"
         static let continuousDictationSentencePauseSeconds = "continuousDictationSentencePauseSeconds"
-        static let continuousDictationSentencePauseMaxSeconds = "continuousDictationSentencePauseMaxSeconds"
     }
 
     static let noSoundName = "None"
@@ -234,20 +234,32 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.continuousDictationStripWhisperPunctuation) }
     }
 
+    // Strip-punctuation mode only. Governs the trailing-period timer
+    // that fires after prolonged silence (at 4 * sentencePauseSeconds)
+    // and appends a closing `.`. OFF leaves the final sentence unclosed.
+    // Mid-dictation sentence breaks (the `". "` + capital prefix inside
+    // the gap window) are driven by the gap-based rule in both modes.
+    var continuousDictationAutoEndPeriod: Bool {
+        get {
+            if defaults.object(forKey: Key.continuousDictationAutoEndPeriod) == nil {
+                return true
+            }
+            return defaults.bool(forKey: Key.continuousDictationAutoEndPeriod)
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationAutoEndPeriod) }
+    }
+
+    // Strip-punctuation mode. The master timing knob. Window opens at
+    // this value and closes at 2x. A chunk arriving with gap in
+    // [1x, 2x] gets `". "` + capital. Beyond 2x is a dead zone
+    // (continuation). The trailing-period timer fires at 4x of total
+    // silence from speech-end.
     var continuousDictationSentencePauseSeconds: Double {
         get {
             let stored = defaults.double(forKey: Key.continuousDictationSentencePauseSeconds)
             return stored == 0 ? 1.0 : stored
         }
         set { defaults.set(newValue, forKey: Key.continuousDictationSentencePauseSeconds) }
-    }
-
-    var continuousDictationSentencePauseMaxSeconds: Double {
-        get {
-            let stored = defaults.double(forKey: Key.continuousDictationSentencePauseMaxSeconds)
-            return stored == 0 ? 2.0 : stored
-        }
-        set { defaults.set(newValue, forKey: Key.continuousDictationSentencePauseMaxSeconds) }
     }
 
     // Words / tokens that the post-processing casing normalizer would
@@ -527,8 +539,8 @@ final class Preferences {
         Key.continuousDictationPromptChainEnabled,
         Key.continuousDictationPromptChainMaxChars,
         Key.continuousDictationStripWhisperPunctuation,
-        Key.continuousDictationSentencePauseSeconds,
-        Key.continuousDictationSentencePauseMaxSeconds
+        Key.continuousDictationAutoEndPeriod,
+        Key.continuousDictationSentencePauseSeconds
     ]
 
     // MARK: - Keychain

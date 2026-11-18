@@ -151,8 +151,13 @@ final class PreferencesWindowController: NSWindowController,
         b.title = "Strip whisper punctuation, drive sentence breaks from pause length"
         return b
     }()
-    private let sentencePauseMinField = NSTextField()
-    private let sentencePauseMaxField = NSTextField()
+    private let autoEndPeriodCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Append period to close the final sentence after silence"
+        return b
+    }()
+    private let continuousSentencePauseField = NSTextField()
     private let typedDelayField = NSTextField()
     private let typedDelayStepper = NSStepper()
 
@@ -166,8 +171,8 @@ final class PreferencesWindowController: NSWindowController,
     private var continuousPauseLabel: NSTextField?
     private var continuousMaxChunkLabel: NSTextField?
     private var continuousPromptChainMaxCharsLabel: NSTextField?
-    private var sentencePauseMinLabel: NSTextField?
-    private var sentencePauseMaxLabel: NSTextField?
+    private var continuousSentencePauseLabel: NSTextField?
+    private var continuousSentencePauseHint: NSTextField?
 
     // MARK: - State
 
@@ -317,8 +322,9 @@ final class PreferencesWindowController: NSWindowController,
         continuousPromptChainMaxCharsField.delegate = self
         stripWhisperPunctuationCheckbox.target = self
         stripWhisperPunctuationCheckbox.action = #selector(stripWhisperPunctuationChanged)
-        sentencePauseMinField.delegate = self
-        sentencePauseMaxField.delegate = self
+        autoEndPeriodCheckbox.target = self
+        autoEndPeriodCheckbox.action = #selector(autoEndPeriodChanged)
+        continuousSentencePauseField.delegate = self
 
         typedDelayStepper.minValue = 5
         typedDelayStepper.maxValue = 100
@@ -644,34 +650,26 @@ final class PreferencesWindowController: NSWindowController,
         promptCharsRow.orientation = .horizontal
         promptCharsRow.spacing = 8
 
-        sentencePauseMinField.translatesAutoresizingMaskIntoConstraints = false
-        sentencePauseMinField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let sentencePauseMinHint = NSTextField(frame: .zero)
-        sentencePauseMinHint.isEditable = false; sentencePauseMinHint.isSelectable = false
-        sentencePauseMinHint.isBordered = false; sentencePauseMinHint.drawsBackground = false
-        sentencePauseMinHint.textColor = .secondaryLabelColor
-        sentencePauseMinHint.stringValue = "seconds · default 1.0 · lower bound of sentence-break window"
-        let sentencePauseMinRow = NSStackView(views: [sentencePauseMinField, sentencePauseMinHint])
-        sentencePauseMinRow.orientation = .horizontal
-        sentencePauseMinRow.spacing = 8
-
-        sentencePauseMaxField.translatesAutoresizingMaskIntoConstraints = false
-        sentencePauseMaxField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let sentencePauseMaxHint = NSTextField(frame: .zero)
-        sentencePauseMaxHint.isEditable = false; sentencePauseMaxHint.isSelectable = false
-        sentencePauseMaxHint.isBordered = false; sentencePauseMaxHint.drawsBackground = false
-        sentencePauseMaxHint.textColor = .secondaryLabelColor
-        sentencePauseMaxHint.stringValue = "seconds · default 2.0 · gaps longer than this are think-pauses, not sentences"
-        let sentencePauseMaxRow = NSStackView(views: [sentencePauseMaxField, sentencePauseMaxHint])
-        sentencePauseMaxRow.orientation = .horizontal
-        sentencePauseMaxRow.spacing = 8
+        continuousSentencePauseField.translatesAutoresizingMaskIntoConstraints = false
+        continuousSentencePauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let sentencePauseHint = NSTextField(frame: .zero)
+        sentencePauseHint.isEditable = false; sentencePauseHint.isSelectable = false
+        sentencePauseHint.isBordered = false; sentencePauseHint.drawsBackground = false
+        sentencePauseHint.textColor = .secondaryLabelColor
+        sentencePauseHint.stringValue = PreferencesWindowController.sentencePauseHintText(
+            Preferences.shared.continuousDictationSentencePauseSeconds)
+        continuousSentencePauseHint = sentencePauseHint
+        let sentencePauseRow = NSStackView(views: [continuousSentencePauseField, sentencePauseHint])
+        sentencePauseRow.orientation = .horizontal
+        sentencePauseRow.spacing = 8
 
         let lw = PreferencesWindowController.widestLabelWidth(
             ["Input device:", "Start sound:", "Stop sound:",
              "Auto-stop:", "Silence threshold:", "Silence duration:",
              "Continuous:", "Pause:", "Max chunk:",
              "Prompt chain:", "Max chars:",
-             "Strip punctuation:", "Sentence pause min:", "Sentence pause max:"])
+             "Strip punctuation:", "Auto-close:",
+             "Sentence pause:"])
         let after1 = placeRow(labelText: "Input device:", control: inputDevicePopup,
                               in: pane, topAnchor: pane.topAnchor, topConstant: 0, labelWidth: lw)
         let after2 = placeRow(labelText: "Start sound:", control: startSoundPopup,
@@ -714,16 +712,21 @@ final class PreferencesWindowController: NSWindowController,
                                control: stripWhisperPunctuationCheckbox,
                                in: pane, topAnchor: r11.bottom,
                                topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let r13 = placeRowWithLabel(labelText: "Sentence pause min:", control: sentencePauseMinRow,
-                                    in: pane, topAnchor: after12,
+        let after13 = placeRow(labelText: "Auto-close:",
+                               control: autoEndPeriodCheckbox,
+                               in: pane, topAnchor: after12,
+                               topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
+        let r14 = placeRowWithLabel(labelText: "Sentence pause:", control: sentencePauseRow,
+                                    in: pane, topAnchor: after13,
                                     topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        sentencePauseMinLabel = r13.label
-        let r14 = placeRowWithLabel(labelText: "Sentence pause max:", control: sentencePauseMaxRow,
-                                    in: pane, topAnchor: r13.bottom,
-                                    topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        sentencePauseMaxLabel = r14.label
+        continuousSentencePauseLabel = r14.label
         pane.bottomAnchor.constraint(equalTo: r14.bottom).isActive = true
         return pane
+    }
+
+    private static func sentencePauseHintText(_ p: Double) -> String {
+        return String(format: "seconds · default 1.0 · new-sentence window [%.1f, %.1f] · trailing period at %.1f",
+                      p, p * 2, p * 4)
     }
 
     private func buildOutputPane() -> NSView {
@@ -911,10 +914,13 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.continuousDictationPromptChainMaxChars
         stripWhisperPunctuationCheckbox.state =
             Preferences.shared.continuousDictationStripWhisperPunctuation ? .on : .off
-        sentencePauseMinField.stringValue = String(format: "%.1f",
+        autoEndPeriodCheckbox.state =
+            Preferences.shared.continuousDictationAutoEndPeriod ? .on : .off
+        continuousSentencePauseField.stringValue = String(format: "%.1f",
             Preferences.shared.continuousDictationSentencePauseSeconds)
-        sentencePauseMaxField.stringValue = String(format: "%.1f",
-            Preferences.shared.continuousDictationSentencePauseMaxSeconds)
+        continuousSentencePauseHint?.stringValue =
+            PreferencesWindowController.sentencePauseHintText(
+                Preferences.shared.continuousDictationSentencePauseSeconds)
         let typedDelay = Preferences.shared.typedKeystrokeDelayMs
         typedDelayField.integerValue = typedDelay
         typedDelayStepper.integerValue = typedDelay
@@ -1159,6 +1165,11 @@ final class PreferencesWindowController: NSWindowController,
     @objc private func stripWhisperPunctuationChanged() {
         Preferences.shared.continuousDictationStripWhisperPunctuation =
             (stripWhisperPunctuationCheckbox.state == .on)
+    }
+
+    @objc private func autoEndPeriodChanged() {
+        Preferences.shared.continuousDictationAutoEndPeriod =
+            (autoEndPeriodCheckbox.state == .on)
     }
 
     @objc private func typedDelayStepperChanged() {
@@ -1461,28 +1472,18 @@ final class PreferencesWindowController: NSWindowController,
                 setNumericFieldValid(field: continuousPromptChainMaxCharsField,
                                      label: continuousPromptChainMaxCharsLabel, valid: false)
             }
-        case sentencePauseMinField:
+        case continuousSentencePauseField:
             let chunkPause = Preferences.shared.continuousDictationPauseSeconds
-            let currentMax = Preferences.shared.continuousDictationSentencePauseMaxSeconds
-            if let v = Double(sentencePauseMinField.stringValue),
-               v > chunkPause, v < currentMax, v <= 5.0 {
+            if let v = Double(continuousSentencePauseField.stringValue),
+               v > chunkPause, v <= 5.0 {
                 Preferences.shared.continuousDictationSentencePauseSeconds = v
-                setNumericFieldValid(field: sentencePauseMinField,
-                                     label: sentencePauseMinLabel, valid: true)
+                setNumericFieldValid(field: continuousSentencePauseField,
+                                     label: continuousSentencePauseLabel, valid: true)
+                continuousSentencePauseHint?.stringValue =
+                    PreferencesWindowController.sentencePauseHintText(v)
             } else {
-                setNumericFieldValid(field: sentencePauseMinField,
-                                     label: sentencePauseMinLabel, valid: false)
-            }
-        case sentencePauseMaxField:
-            let currentMin = Preferences.shared.continuousDictationSentencePauseSeconds
-            if let v = Double(sentencePauseMaxField.stringValue),
-               v > currentMin, v <= 10.0 {
-                Preferences.shared.continuousDictationSentencePauseMaxSeconds = v
-                setNumericFieldValid(field: sentencePauseMaxField,
-                                     label: sentencePauseMaxLabel, valid: true)
-            } else {
-                setNumericFieldValid(field: sentencePauseMaxField,
-                                     label: sentencePauseMaxLabel, valid: false)
+                setNumericFieldValid(field: continuousSentencePauseField,
+                                     label: continuousSentencePauseLabel, valid: false)
             }
         default:
             break
@@ -1516,15 +1517,10 @@ final class PreferencesWindowController: NSWindowController,
         case continuousPromptChainMaxCharsField:
             guard let v = Int(continuousPromptChainMaxCharsField.stringValue) else { return false }
             return v >= 100 && v <= 900
-        case sentencePauseMinField:
+        case continuousSentencePauseField:
             let chunkPause = Preferences.shared.continuousDictationPauseSeconds
-            let currentMax = Preferences.shared.continuousDictationSentencePauseMaxSeconds
-            guard let v = Double(sentencePauseMinField.stringValue) else { return false }
-            return v > chunkPause && v < currentMax && v <= 5.0
-        case sentencePauseMaxField:
-            let currentMin = Preferences.shared.continuousDictationSentencePauseSeconds
-            guard let v = Double(sentencePauseMaxField.stringValue) else { return false }
-            return v > currentMin && v <= 10.0
+            guard let v = Double(continuousSentencePauseField.stringValue) else { return false }
+            return v > chunkPause && v <= 5.0
         default:
             return true
         }
@@ -1572,16 +1568,14 @@ final class PreferencesWindowController: NSWindowController,
                 Preferences.shared.continuousDictationPromptChainMaxChars
             setNumericFieldValid(field: continuousPromptChainMaxCharsField,
                                  label: continuousPromptChainMaxCharsLabel, valid: true)
-        case sentencePauseMinField:
-            sentencePauseMinField.stringValue = String(format: "%.1f",
+        case continuousSentencePauseField:
+            continuousSentencePauseField.stringValue = String(format: "%.1f",
                 Preferences.shared.continuousDictationSentencePauseSeconds)
-            setNumericFieldValid(field: sentencePauseMinField,
-                                 label: sentencePauseMinLabel, valid: true)
-        case sentencePauseMaxField:
-            sentencePauseMaxField.stringValue = String(format: "%.1f",
-                Preferences.shared.continuousDictationSentencePauseMaxSeconds)
-            setNumericFieldValid(field: sentencePauseMaxField,
-                                 label: sentencePauseMaxLabel, valid: true)
+            setNumericFieldValid(field: continuousSentencePauseField,
+                                 label: continuousSentencePauseLabel, valid: true)
+            continuousSentencePauseHint?.stringValue =
+                PreferencesWindowController.sentencePauseHintText(
+                    Preferences.shared.continuousDictationSentencePauseSeconds)
         default:
             break
         }
