@@ -342,12 +342,22 @@ final class AudioRecorder {
     // MARK: - Input device selection
 
     private func applyPreferredInputDevice() throws {
+        // Empty UID means "follow the current system default input". Must
+        // actively resolve and set it: AVAudioEngine's inputNode retains
+        // whatever device was last pinned on its audio unit, so after
+        // selecting a specific device once, switching prefs back to
+        // Default would otherwise leave the previous device stuck. Also
+        // handles the case where System Preferences' default input
+        // changes after process start.
         let uid = Preferences.shared.inputDeviceUID
-        guard !uid.isEmpty else { return }
-        guard let deviceID = AudioRecorder.audioDeviceID(forUID: uid) else { return }
-        var id = deviceID
-        let au = engine.inputNode.audioUnit
-        guard let unit = au else { return }
+        let resolved: AudioDeviceID?
+        if uid.isEmpty {
+            resolved = AudioRecorder.systemDefaultInputDeviceID()
+        } else {
+            resolved = AudioRecorder.audioDeviceID(forUID: uid)
+        }
+        guard var id = resolved else { return }
+        guard let unit = engine.inputNode.audioUnit else { return }
         let size = UInt32(MemoryLayout<AudioDeviceID>.size)
         let status = AudioUnitSetProperty(
             unit,
@@ -362,6 +372,20 @@ final class AudioRecorder {
                           userInfo: [NSLocalizedDescriptionKey:
                             "Could not set input device (OSStatus \(status))"])
         }
+    }
+
+    private static func systemDefaultInputDeviceID() -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMaster
+        )
+        var id: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id)
+        if status != noErr || id == 0 { return nil }
+        return id
     }
 
     static func availableInputDevices() -> [(uid: String, name: String)] {
