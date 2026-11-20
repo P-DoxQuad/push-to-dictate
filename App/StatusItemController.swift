@@ -618,10 +618,7 @@ final class StatusItemController: NSObject,
     }
 
     private func scheduleTrailingPeriod() {
-        // Trailing-period threshold is derived as 4x the sentence-pause
-        // knob, so the single pref drives the whole timing model
-        // ([P, 2P] window, 4P trailing).
-        let seconds = Preferences.shared.continuousDictationSentencePauseSeconds * 4
+        let seconds = Preferences.shared.continuousDictationTrailingPeriodSeconds
         if seconds <= 0 { return }
         let sessionId = currentContinuousSessionId
         let work = DispatchWorkItem { [weak self] in
@@ -655,6 +652,11 @@ final class StatusItemController: NSObject,
         let patterns = [
             "\\[[^\\]]*\\]",
             "\\([^\\)]*\\)",
+            // Asterisk-delimited sound annotations whisper emits on
+            // near-silent or non-speech chunks: *cough*, *laughs*,
+            // *sighs*, *music playing*, etc. Match a `*` followed by
+            // non-`*` content and a closing `*`.
+            "\\*[^*]*\\*",
             // Leading angle-bracket artifacts whisper emits on silent or
             // near-silent chunks (e.g. ">> I" when transcribing a long
             // silence). Strip them along with any surrounding whitespace.
@@ -874,9 +876,9 @@ final class StatusItemController: NSObject,
                         // when the app doesn't support text AX; fall
                         // through to the normal logic in that case.
                         let atLineStart = CursorContext.isCursorAtLineStart()
-                        let pauseSeconds = prefs.continuousDictationSentencePauseSeconds
                         let gapIsSentenceBreak =
-                            gap >= pauseSeconds && gap <= (pauseSeconds * 2)
+                            gap >= prefs.continuousDictationSentencePauseSeconds
+                            && gap <= prefs.continuousDictationSentencePauseMaxSeconds
                         if isFirstContinuousChunk {
                             prefix = ""
                             isFirstContinuousChunk = false
