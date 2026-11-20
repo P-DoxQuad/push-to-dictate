@@ -20,7 +20,7 @@ Applies to all project docs (CLAUDE.md, README.md, DEVLOG.md, THIRD_PARTY_NOTICE
 
 ## Build
 
-- Xcode 10.1. Swift 4.2. Deployment target 10.13.
+- Xcode 10.1. Swift 4.2. Deployment target 10.11 (El Capitan).
 - AppKit, menu-bar only. `LSUIElement = YES` in `Info.plist`.
 - Source layout: `App/`, `Core/`, `Transcribers/`, `Prefs/`, `icons/`.
 - whisper.cpp: pinned to v1.7.2. Build `whisper-cli` for x86_64 via `scripts/setup.sh`. Models bundled in `.app/Contents/Resources/`; writable fallback is `~/Library/Application Support/push-to-dictate/models/`.
@@ -40,7 +40,7 @@ CRITICAL. The compiler is Swift 4.2 on Xcode 10.1. Swift 5 APIs do not exist her
 
 The compiler message for these is usually "unable to infer closure type in the current context" or "value of type 'Character' has no member 'X'". Both are tell-tale signs of a Swift 5 API slipping into 4.2 code.
 
-Also unavailable at the deployment target even when the compiler would allow it: `async/await` (Swift 5.5), `actor` (5.5), `@MainActor` (5.5), `Combine` (10.15+), `SwiftUI` (10.15+), `OSLog` 10.14+ APIs.
+Also unavailable at the deployment target (10.11) even when the compiler would allow it: `async/await` (Swift 5.5), `actor` (5.5), `@MainActor` (5.5), `Combine` (10.15+), `SwiftUI` (10.15+), `OSLog` 10.14+ APIs, `UNUserNotificationCenter` (10.14+), `effectiveAppearance` dark-mode detection (10.14+), `NSApp.appearance` modern dark-mode (10.14+). 10.14+ features that are actually needed must be wrapped in `#available(macOS 10.14, *)` with a 10.11-compatible fallback path (see `StatusItemController.showError` and dark-mode icon selection as the pattern).
 
 ## UI copy
 
@@ -142,4 +142,4 @@ Local workspace:
 - Host: Mac Pro 5,1. macOS 10.13.6. Xcode 10.1 primary, 9.4.1 available.
 - Swift 4.2 ceiling. No async/await, no Swift 5 runtime.
 - whisper.cpp Swift package targets modern SPM. Unusable at this Swift ceiling. Use C API via bridging header, or shell out to `whisper-cli`.
-- Mic permission dialog does not exist on 10.13. Input Monitoring permission does not exist on 10.13. Accessibility permission does: required for `CGEventTap` and synthetic keystrokes.
+- Mic permission dialog does not exist on 10.11-10.13. Input Monitoring permission does not exist on 10.11-10.13. Accessibility permission does: required for `CGEventTap` and synthetic keystrokes.

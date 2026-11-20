@@ -1159,3 +1159,61 @@ UI collapse in the Audio pane: `Sentence pause min:` and `Sentence pause max:` r
 `AudioRecorder.applyPreferredInputDevice` previously short-circuited when `Preferences.inputDeviceUID` was empty (the "Default" case), on the assumption that `AVAudioEngine.inputNode` would follow the system default input. It doesn't: the input node retains whatever device was last pinned on its audio unit via `kAudioOutputUnitProperty_CurrentDevice`. After the user picked a specific device once, switching back to "Default" in Preferences left the previously-pinned device stuck. The engine also doesn't follow a System Preferences default-input change made mid-process.
 
 Fix: when the UID is empty, actively resolve the current system default via `AudioObjectGetPropertyData` with `kAudioHardwarePropertyDefaultInputDevice`, then set it on the input node's audio unit using the same path as the explicit-UID branch. New private helper `systemDefaultInputDeviceID() -> AudioDeviceID?`. "Default" now means "the current system default at the moment `start()` is called," which matches what the UI label implies.
+
+#### Preferences window layout revamp (sectioned v2)
+
+Restructured all preference panes to a grouped-section layout matching the v2 mockups. Sidebar categories reduced from six to five (`General, Audio, Transcription, Output, Advanced`); the standalone `Interface` pane is gone and its colored-icon checkbox moved into `General → Appearance`.
+
+Content moves between panes:
+
+- `Continuous dictation` checkbox, `Pause`, `Max chunk`, `Prompt chain`, `Max chars`, `Strip Whisper punctuation`: moved from `Audio` to `Transcription → Behavior`.
+- `Auto-close` and sentence-handling fields: moved from `Audio` to `Output → Sentence Handling`.
+- `Colored menu bar icon`: moved from `Interface` to `General → Appearance`.
+- `Backup` (Export / Import) rows now live in `General → Settings`.
+
+New layout primitives in `PreferencesWindowController.swift`:
+
+- `FlippedView` (private final NSView subclass, `isFlipped = true`). Used as the pane root and as each section's rounded container so chained top-down autolayout constraints produce top-aligned content when the pane is hosted inside an NSScrollView's non-flipped clip view. Without this, documentView content lands at the bottom of the visible area and is unreachable until scrolled. Declared at file scope above `PreferencesWindowController` to keep Xcode's indexer happy with the forward reference from the pane builders.
+- `buildSection(title:rows:)` returns a composite view with a bold `NSTextField` header above a rounded, filled "box". The box is a layer-backed `FlippedView` with `wantsLayer = true`, `layer.backgroundColor = NSColor(white: 0, alpha: 0.05).cgColor`, `layer.cornerRadius = 8`. Rows stack vertically via explicit anchor chaining from the box's `topAnchor` through each row to `bottomAnchor`. Earlier attempts used `NSBox` with a custom `NSStackView` as `contentView` but the box failed to derive a height from the stack view's intrinsic size and rendered as zero-height, hiding all content.
+- `placeSection(_:in:below:topConstant:)` pins a section into a pane with leading / trailing `paneInset` and anchors the section vertically below a given top anchor. Returns the section's bottom anchor for chaining. Mirrors the existing `placeRow` / `placeRowWithLabel` pattern.
+- `makeSectionHeader(_:)` returns a bold-font `NSTextField` for section titles.
+- `makeCaption(_:)` returns a small secondary-label `NSTextField` used under checkboxes and buttons (e.g. "Toggle mode only", "Toggle mode only · experimental", "Restores all preferences to their original values.", and the `Output → Notes` informational paragraph).
+- `makeHint(_:)` returns the small inline hint text that sits to the right of numeric fields (`seconds · default 0.5`, etc.).
+- `buildLabeledRow(labelText:control:labelWidth:)` is a variant of the existing `buildRowView` that also returns the label view so numeric-field validation can toggle the label's text color on invalid input.
+
+Each pane is now wrapped in an `NSScrollView` inside `contentContainer` so panes taller than the window (Transcription especially, with the Behavior section's six rows) remain reachable. The pane's width is pinned to the scroll view's clip-view width; height grows freely with content. Default window size bumped from 680×420 to 720×560; minimum from 600×340 to 640×420.
+
+Checkbox titles shortened and the long "(Toggle mode only)" / "(experimental)" parentheticals moved into their own captions beneath the checkbox: `silenceAutoStopCheckbox`, `continuousDictationCheckbox`, and `coloredIconCheckbox` were all trimmed.
+
+Conditional row visibility: the Backend section's rows (Local model row vs OpenAI API key row) toggle individually based on the selected backend via the existing `transcriptionModelRow` and `transcriptionApiKeyRow` references. The entire Models Folder section is now hidden when backend is OpenAI via a new `transcriptionModelsFolderSection` reference captured during layout.
+
+#### Sentence handling: three-knob timing with cascade
+
+Replaced the single sentence-pause knob with three independently-persisted preferences, matching the natural "first silence → new-sentence window → closing period" progression:
+
+- `continuousDictationSentencePauseSeconds` (default `1.0`): opens the new-sentence window.
+- `continuousDictationSentencePauseMaxSeconds` (default `2.0`): closes the window; longer gaps fall into the dead zone and resuming chunks get `" "` continuation instead of `". "` + capital.
+- `continuousDictationTrailingPeriodSeconds` (default `4.0`): silence from speech-end that triggers injection of a closing `.` when auto-end-period is on.
+
+`StatusItemController` reads all three directly. The earlier `P × 2` / `P × 4` derivation is gone.
+
+Each field has its own stepper and typed input in `Output → Sentence Handling`. Validation chain enforces `chunkPause < sentencePause < windowClose < trailingPeriod`; each field independently rejects values that break the chain with the one directly above it.
+
+Editing the sentence-pause field cascades to the other two via `applyCascadingSentencePause(_:)`: computes `scale = newP / oldP`, multiplies the stored window-close and trailing-period values by that scale, writes both back to prefs and UI. Preserves the user's current ratio rather than forcing a fixed `2×` / `4×` relationship. Each dependent is still clamped to its floor (`newP + 0.1` for window-close, `newMax + 0.1` for trailing-period) so the ordering invariant always holds. Editing window-close or trailing-period directly updates just that one; no cascade back to sentence-pause.
+
+#### Numeric field validation: color on change, commit on end-editing
+
+Reworked the delegate handling for numeric preference fields. Previously `controlTextDidChange` ran the full validate-and-write-to-prefs path on every keystroke; the sentence-pause field's cascade (`applyCascadingSentencePause`) wrote back to the field's `stringValue`, clobbering the user's in-progress edit and making it impossible to type values like `1.2` from an existing `1.0` (the intermediate `1.` or the deletion of the trailing `0` triggered a rewrite).
+
+New split in `PreferencesWindowController.swift`:
+
+- `controlTextDidChange` calls only `markNumericFieldValidity(_:)`, which looks up the paired label from the field reference and sets the text / label color red or normal based on `numericFieldIsValid(_:)`. No pref writes, no stepper sync, no stringValue mutation.
+- `controlTextDidEndEditing` (fires on Enter, Tab, or focus loss) is the commit point: if valid, calls `validateNumericField(_:)` which writes to prefs, syncs the stepper, and runs the cascade for sentence-pause; if invalid, beeps and reverts to the stored pref via `revertNumericFieldToPref(_:)`.
+
+Visual feedback (red text while typing an out-of-range value) is preserved. Writes to prefs happen exactly once per commit instead of per keystroke.
+
+#### Asterisk-delimited whisper annotations
+
+Whisper emits a second annotation style on near-silent or non-speech chunks that the bracket / paren strip patterns don't catch: asterisk-delimited markers like `*cough*`, `*laughs*`, `*sighs*`, `*music playing*`. These were slipping through into injected output.
+
+Added a third regex to the `postProcessTranscript` strip patterns: `\\*[^*]*\\*`. Matches a `*`, any run of non-`*` characters, and a closing `*`. After the strip the leftover is empty, so the existing `hasContent` check (requires at least one alphanumeric) drops the chunk before injection. No new preference; the strip is unconditional alongside the existing bracket and paren patterns.

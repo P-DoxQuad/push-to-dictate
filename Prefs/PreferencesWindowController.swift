@@ -1,6 +1,14 @@
 import Cocoa
 import CoreGraphics
 
+// Document / pane view that flips the coordinate system so content
+// stacks from the top-left. Needed for any view that hosts chained
+// top-down constraints inside an NSScrollView; otherwise content lands
+// at the bottom of the visible area.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { return true }
+}
+
 final class PreferencesWindowController: NSWindowController,
                                          NSTextFieldDelegate,
                                          NSTableViewDataSource,
@@ -73,7 +81,7 @@ final class PreferencesWindowController: NSWindowController,
     private let coloredIconCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
-        b.title = "Colored menu bar icon (unchecked, matches light/dark mode)"
+        b.title = "Use colored menu bar icon"
         return b
     }()
     private let logEverythingCheckbox: NSButton = {
@@ -125,7 +133,7 @@ final class PreferencesWindowController: NSWindowController,
     private let silenceAutoStopCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
-        b.title = "Auto-stop after silence (Toggle mode only)"
+        b.title = "Auto-stop after silence"
         return b
     }()
     private let silenceThresholdField = NSTextField()
@@ -133,7 +141,7 @@ final class PreferencesWindowController: NSWindowController,
     private let continuousDictationCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
-        b.title = "Continuous dictation (Toggle mode only, experimental)"
+        b.title = "Continuous dictation"
         return b
     }()
     private let continuousPauseField = NSTextField()
@@ -154,10 +162,15 @@ final class PreferencesWindowController: NSWindowController,
     private let autoEndPeriodCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
-        b.title = "Append period to close the final sentence after silence"
+        b.title = "Automatic trailing period to close final sentence"
         return b
     }()
     private let continuousSentencePauseField = NSTextField()
+    private let continuousSentencePauseStepper = NSStepper()
+    private let continuousSentencePauseMaxField = NSTextField()
+    private let continuousSentencePauseMaxStepper = NSStepper()
+    private let continuousTrailingPeriodField = NSTextField()
+    private let continuousTrailingPeriodStepper = NSStepper()
     private let typedDelayField = NSTextField()
     private let typedDelayStepper = NSStepper()
 
@@ -172,7 +185,8 @@ final class PreferencesWindowController: NSWindowController,
     private var continuousMaxChunkLabel: NSTextField?
     private var continuousPromptChainMaxCharsLabel: NSTextField?
     private var continuousSentencePauseLabel: NSTextField?
-    private var continuousSentencePauseHint: NSTextField?
+    private var continuousSentencePauseMaxLabel: NSTextField?
+    private var continuousTrailingPeriodLabel: NSTextField?
 
     // MARK: - State
 
@@ -180,17 +194,18 @@ final class PreferencesWindowController: NSWindowController,
     private var hotkeyMonitor: Any?
     private var isRecordingHotkey = false
 
-    private let categoryTitles = ["General", "Transcription", "Audio", "Output",
-                                  "Interface", "Advanced"]
+    private let categoryTitles = ["General", "Audio", "Transcription", "Output",
+                                  "Advanced"]
     private var categoryViews: [NSView] = []
     private let sidebarTable = NSTableView()
     private let contentContainer = NSView()
     private var manageModelsController: ManageModelsWindowController?
 
-    // Transcription pane row wrappers for conditional hiding.
+    // Transcription pane row / section wrappers for conditional hiding
+    // based on the selected backend.
     private var transcriptionModelRow: NSView?
-    private var transcriptionModelsFolderRow: NSView?
     private var transcriptionApiKeyRow: NSView?
+    private var transcriptionModelsFolderSection: NSView?
 
     // MARK: - Layout constants
 
@@ -199,18 +214,19 @@ final class PreferencesWindowController: NSWindowController,
     private static let labelToControl: CGFloat = 8
     private static let rowGap: CGFloat = 12
     private static let paneInset: CGFloat = 20
+    private static let sectionGap: CGFloat = 18
 
     // MARK: - Init
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false)
         window.title = "Push to Dictate Preferences"
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 600, height: 340)
+        window.minSize = NSSize(width: 640, height: 420)
         self.init(window: window)
         wireActions()
         buildLayout()
@@ -325,6 +341,28 @@ final class PreferencesWindowController: NSWindowController,
         autoEndPeriodCheckbox.target = self
         autoEndPeriodCheckbox.action = #selector(autoEndPeriodChanged)
         continuousSentencePauseField.delegate = self
+        continuousSentencePauseStepper.minValue = 0.1
+        continuousSentencePauseStepper.maxValue = 5.0
+        continuousSentencePauseStepper.increment = 0.1
+        continuousSentencePauseStepper.valueWraps = false
+        continuousSentencePauseStepper.target = self
+        continuousSentencePauseStepper.action = #selector(continuousSentencePauseStepperChanged)
+
+        continuousSentencePauseMaxField.delegate = self
+        continuousSentencePauseMaxStepper.minValue = 0.2
+        continuousSentencePauseMaxStepper.maxValue = 10.0
+        continuousSentencePauseMaxStepper.increment = 0.1
+        continuousSentencePauseMaxStepper.valueWraps = false
+        continuousSentencePauseMaxStepper.target = self
+        continuousSentencePauseMaxStepper.action = #selector(continuousSentencePauseMaxStepperChanged)
+
+        continuousTrailingPeriodField.delegate = self
+        continuousTrailingPeriodStepper.minValue = 0.2
+        continuousTrailingPeriodStepper.maxValue = 20.0
+        continuousTrailingPeriodStepper.increment = 0.1
+        continuousTrailingPeriodStepper.valueWraps = false
+        continuousTrailingPeriodStepper.target = self
+        continuousTrailingPeriodStepper.action = #selector(continuousTrailingPeriodStepperChanged)
 
         typedDelayStepper.minValue = 5
         typedDelayStepper.maxValue = 100
@@ -342,10 +380,9 @@ final class PreferencesWindowController: NSWindowController,
 
         categoryViews = [
             buildGeneralPane(),
-            buildTranscriptionPane(),
             buildAudioPane(),
+            buildTranscriptionPane(),
             buildOutputPane(),
-            buildInterfacePane(),
             buildAdvancedPane()
         ]
 
@@ -393,16 +430,32 @@ final class PreferencesWindowController: NSWindowController,
         guard index >= 0, index < categoryViews.count else { return }
         let pane = categoryViews[index]
         pane.translatesAutoresizingMaskIntoConstraints = false
-        contentContainer.addSubview(pane)
+
+        // Wrap the pane in an NSScrollView so sections that exceed the
+        // window height remain reachable. Each pane already carries its
+        // own section insets via `placeSection`, so the scroll view adds
+        // no extra padding of its own.
+        let scroll = NSScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+        scroll.documentView = pane
+
+        contentContainer.addSubview(scroll)
         NSLayoutConstraint.activate([
-            pane.topAnchor.constraint(equalTo: contentContainer.topAnchor,
-                                      constant: PreferencesWindowController.paneInset),
-            pane.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor,
-                                          constant: PreferencesWindowController.paneInset),
-            pane.trailingAnchor.constraint(lessThanOrEqualTo: contentContainer.trailingAnchor,
-                                           constant: -PreferencesWindowController.paneInset),
-            pane.bottomAnchor.constraint(lessThanOrEqualTo: contentContainer.bottomAnchor,
-                                         constant: -PreferencesWindowController.paneInset)
+            scroll.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
+            // Pin the pane's width to the scroll view's clip view so sections
+            // stretch across the full content area; let height grow freely so
+            // overflow scrolls.
+            pane.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            pane.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            pane.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor)
         ])
     }
 
@@ -432,6 +485,111 @@ final class PreferencesWindowController: NSWindowController,
         f.stringValue = text
         f.translatesAutoresizingMaskIntoConstraints = false
         return f
+    }
+
+    // Bold section header used above each grouped section in the v2
+    // preferences layout.
+    private static func makeSectionHeader(_ text: String) -> NSTextField {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false
+        f.isSelectable = false
+        f.isBordered = false
+        f.drawsBackground = false
+        f.stringValue = text
+        f.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
+        f.textColor = .labelColor
+        f.translatesAutoresizingMaskIntoConstraints = false
+        return f
+    }
+
+    // Small secondary-label caption used beneath checkboxes and buttons
+    // (e.g. "Toggle mode only", "Restores all preferences to their original
+    // values."). Wraps if the containing section has a width constraint.
+    private static func makeCaption(_ text: String) -> NSTextField {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false
+        f.isSelectable = false
+        f.isBordered = false
+        f.drawsBackground = false
+        f.stringValue = text
+        f.font = NSFont.systemFont(ofSize: 11)
+        f.textColor = .secondaryLabelColor
+        f.lineBreakMode = .byWordWrapping
+        f.cell?.wraps = true
+        f.cell?.isScrollable = false
+        f.translatesAutoresizingMaskIntoConstraints = false
+        return f
+    }
+
+    // Wraps a vertical stack of row views in a filled, rounded container
+    // (layer-backed NSView instead of NSBox, so content height drives
+    // the container's height via plain autolayout constraints) and
+    // places a bold section header above it. Returned view is suitable
+    // for use with `placeSection` inside a pane.
+    private func buildSection(title: String, rows: [NSView]) -> NSView {
+        let header = PreferencesWindowController.makeSectionHeader(title)
+
+        let box = FlippedView()
+        box.translatesAutoresizingMaskIntoConstraints = false
+        box.wantsLayer = true
+        // Subtle version-safe tint: works on light and dark backgrounds
+        // without needing dynamic colors (which are 10.14+).
+        box.layer?.backgroundColor = NSColor(white: 0.0, alpha: 0.05).cgColor
+        box.layer?.cornerRadius = 8
+
+        let topPad: CGFloat = 12
+        let bottomPad: CGFloat = 12
+        let leftPad: CGFloat = 14
+        let rightPad: CGFloat = 14
+
+        var previousBottom: NSLayoutYAxisAnchor = box.topAnchor
+        var previousGap: CGFloat = topPad
+        for row in rows {
+            row.translatesAutoresizingMaskIntoConstraints = false
+            box.addSubview(row)
+            NSLayoutConstraint.activate([
+                row.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: leftPad),
+                row.topAnchor.constraint(equalTo: previousBottom, constant: previousGap),
+                row.trailingAnchor.constraint(lessThanOrEqualTo: box.trailingAnchor,
+                                              constant: -rightPad)
+            ])
+            previousBottom = row.bottomAnchor
+            previousGap = PreferencesWindowController.rowGap
+        }
+        box.bottomAnchor.constraint(equalTo: previousBottom, constant: bottomPad).isActive = true
+
+        let container = FlippedView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(header)
+        container.addSubview(box)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            header.topAnchor.constraint(equalTo: container.topAnchor),
+            box.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            box.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            box.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 6),
+            box.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        return container
+    }
+
+    // Places a section inside a pane, pinned to the pane's leading /
+    // trailing edges with `paneInset` and anchored vertically below the
+    // given top anchor. Returns the section's bottom anchor so the next
+    // section can chain off it.
+    @discardableResult
+    private func placeSection(_ section: NSView,
+                              in pane: NSView,
+                              below top: NSLayoutYAxisAnchor,
+                              topConstant: CGFloat) -> NSLayoutYAxisAnchor {
+        pane.addSubview(section)
+        let inset = PreferencesWindowController.paneInset
+        NSLayoutConstraint.activate([
+            section.leadingAnchor.constraint(equalTo: pane.leadingAnchor, constant: inset),
+            section.trailingAnchor.constraint(equalTo: pane.trailingAnchor, constant: -inset),
+            section.topAnchor.constraint(equalTo: top, constant: topConstant)
+        ])
+        return section.bottomAnchor
     }
 
     // Place a label + control pair directly into `pane` at the given top
@@ -506,63 +664,189 @@ final class PreferencesWindowController: NSWindowController,
     }
 
     private func buildGeneralPane() -> NSView {
-        let pane = NSView()
+        let pane = FlippedView()
         pane.translatesAutoresizingMaskIntoConstraints = false
 
         let hotkeyRow = NSStackView(views: [hotkeyButton, hotkeyStatusLabel])
         hotkeyRow.orientation = .horizontal
         hotkeyRow.spacing = 8
-
         let backupRow = NSStackView(views: [exportButton, importButton])
         backupRow.orientation = .horizontal
         backupRow.spacing = 8
 
-        let lw = PreferencesWindowController.widestLabelWidth(
-            ["Hotkey:", "Startup:", "Backup:"])
+        let lw = PreferencesWindowController.widestLabelWidth(["Hotkey:"])
+        let hotkeyLabeledRow = buildRowView(labelText: "Hotkey:",
+                                            control: hotkeyRow, labelWidth: lw)
 
-        let after1 = placeRow(labelText: "Hotkey:", control: hotkeyRow,
-                              in: pane, topAnchor: pane.topAnchor, topConstant: 0, labelWidth: lw)
-        let after2 = placeRow(labelText: "Startup:", control: launchCheckbox,
-                              in: pane, topAnchor: after1,
-                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let after3 = placeRow(labelText: "Backup:", control: backupRow,
-                              in: pane, topAnchor: after2,
-                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        pane.bottomAnchor.constraint(equalTo: after3).isActive = true
+        let coloredStack = NSStackView(views: [
+            coloredIconCheckbox,
+            PreferencesWindowController.makeCaption(
+                "When off, the icon follows the current light/dark preference.")
+        ])
+        coloredStack.orientation = .vertical
+        coloredStack.alignment = .leading
+        coloredStack.spacing = 2
+
+        let startup = buildSection(title: "Startup & Shortcut",
+                                   rows: [hotkeyLabeledRow, launchCheckbox])
+        let appearance = buildSection(title: "Appearance",
+                                      rows: [coloredStack])
+        let settings = buildSection(title: "Settings",
+                                    rows: [backupRow])
+
+        let inset = PreferencesWindowController.paneInset
+        let gap = PreferencesWindowController.sectionGap
+        let after1 = placeSection(startup, in: pane, below: pane.topAnchor, topConstant: inset)
+        let after2 = placeSection(appearance, in: pane, below: after1, topConstant: gap)
+        let after3 = placeSection(settings, in: pane, below: after2, topConstant: gap)
+        pane.bottomAnchor.constraint(greaterThanOrEqualTo: after3, constant: inset).isActive = true
+        return pane
+    }
+
+    private func buildAudioPane() -> NSView {
+        let pane = FlippedView()
+        pane.translatesAutoresizingMaskIntoConstraints = false
+
+        let lw = PreferencesWindowController.widestLabelWidth(
+            ["Input device:", "Start sound:", "Stop sound:",
+             "Silence threshold:", "Silence duration:"])
+
+        let inputRow = buildRowView(labelText: "Input device:",
+                                    control: inputDevicePopup, labelWidth: lw)
+        let startRow = buildRowView(labelText: "Start sound:",
+                                    control: startSoundPopup, labelWidth: lw)
+        let stopRow = buildRowView(labelText: "Stop sound:",
+                                   control: stopSoundPopup, labelWidth: lw)
+
+        let autoStopStack = NSStackView(views: [
+            silenceAutoStopCheckbox,
+            PreferencesWindowController.makeCaption("Toggle mode only")
+        ])
+        autoStopStack.orientation = .vertical
+        autoStopStack.alignment = .leading
+        autoStopStack.spacing = 2
+
+        silenceThresholdField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let thresholdHint = PreferencesWindowController.makeHint(
+            "RMS level · default 0.01 · lower = more sensitive")
+        let thresholdControl = NSStackView(views: [silenceThresholdField, thresholdHint])
+        thresholdControl.orientation = .horizontal
+        thresholdControl.spacing = 8
+        let (thresholdRow, thresholdLabel) = buildLabeledRow(
+            labelText: "Silence threshold:", control: thresholdControl, labelWidth: lw)
+        silenceThresholdLabel = thresholdLabel
+
+        silenceSecondsField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let secondsHint = PreferencesWindowController.makeHint(
+            "seconds · default 4.0 · higher = more tolerant of pauses")
+        let secondsControl = NSStackView(views: [silenceSecondsField, secondsHint])
+        secondsControl.orientation = .horizontal
+        secondsControl.spacing = 8
+        let (secondsRow, secondsLabelRef) = buildLabeledRow(
+            labelText: "Silence duration:", control: secondsControl, labelWidth: lw)
+        silenceSecondsLabel = secondsLabelRef
+
+        let input = buildSection(title: "Input", rows: [inputRow])
+        let feedback = buildSection(title: "Feedback", rows: [startRow, stopRow])
+        let silence = buildSection(title: "Silence Detection",
+                                   rows: [autoStopStack, thresholdRow, secondsRow])
+
+        let inset = PreferencesWindowController.paneInset
+        let gap = PreferencesWindowController.sectionGap
+        let after1 = placeSection(input, in: pane, below: pane.topAnchor, topConstant: inset)
+        let after2 = placeSection(feedback, in: pane, below: after1, topConstant: gap)
+        let after3 = placeSection(silence, in: pane, below: after2, topConstant: gap)
+        pane.bottomAnchor.constraint(greaterThanOrEqualTo: after3, constant: inset).isActive = true
         return pane
     }
 
     private func buildTranscriptionPane() -> NSView {
-        let modelsFolderRow = NSStackView(views: [
-            modelsFolderField, modelsFolderChooseButton, modelsFolderClearButton
-        ])
-        modelsFolderRow.orientation = .horizontal
-        modelsFolderRow.spacing = 6
-        modelsFolderField.widthAnchor.constraint(equalToConstant: 200).isActive = true
-
-        let modelRow = NSStackView(views: [modelPopup, manageModelsButton])
-        modelRow.orientation = .horizontal
-        modelRow.spacing = 8
-
-        apiKeyField.widthAnchor.constraint(equalToConstant: 240).isActive = true
-
-        let lw = PreferencesWindowController.widestLabelWidth(
-            ["Backend:", "Local model:", "Models folder:", "OpenAI API key:"])
-
-        let row1 = buildRowView(labelText: "Backend:", control: backendPopup, labelWidth: lw)
-        let row2 = buildRowView(labelText: "Local model:", control: modelRow, labelWidth: lw)
-        let row3 = buildRowView(labelText: "Models folder:", control: modelsFolderRow, labelWidth: lw)
-        let row4 = buildRowView(labelText: "OpenAI API key:", control: apiKeyField, labelWidth: lw)
-
-        let pane = NSStackView(views: [row1, row2, row3, row4])
-        pane.orientation = .vertical
-        pane.alignment = .leading
-        pane.spacing = PreferencesWindowController.rowGap
+        let pane = FlippedView()
         pane.translatesAutoresizingMaskIntoConstraints = false
 
-        transcriptionModelRow = row2
-        transcriptionModelsFolderRow = row3
-        transcriptionApiKeyRow = row4
+        let lw = PreferencesWindowController.widestLabelWidth(
+            ["Backend:", "Local model:", "OpenAI API key:", "Location:",
+             "Pause:", "Max chunk:", "Max chars:"])
+
+        let backendRow = buildRowView(labelText: "Backend:",
+                                      control: backendPopup, labelWidth: lw)
+        let modelControl = NSStackView(views: [modelPopup, manageModelsButton])
+        modelControl.orientation = .horizontal
+        modelControl.spacing = 8
+        let modelRow = buildRowView(labelText: "Local model:",
+                                    control: modelControl, labelWidth: lw)
+        transcriptionModelRow = modelRow
+
+        apiKeyField.widthAnchor.constraint(equalToConstant: 240).isActive = true
+        let apiKeyRow = buildRowView(labelText: "OpenAI API key:",
+                                     control: apiKeyField, labelWidth: lw)
+        transcriptionApiKeyRow = apiKeyRow
+
+        modelsFolderField.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        let modelsFolderControl = NSStackView(views: [
+            modelsFolderField, modelsFolderChooseButton, modelsFolderClearButton
+        ])
+        modelsFolderControl.orientation = .horizontal
+        modelsFolderControl.spacing = 6
+        let modelsFolderRow = buildRowView(labelText: "Location:",
+                                           control: modelsFolderControl, labelWidth: lw)
+
+        let continuousStack = NSStackView(views: [
+            continuousDictationCheckbox,
+            PreferencesWindowController.makeCaption("Toggle mode only · experimental")
+        ])
+        continuousStack.orientation = .vertical
+        continuousStack.alignment = .leading
+        continuousStack.spacing = 2
+
+        continuousPauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let pauseHint = PreferencesWindowController.makeHint(
+            "seconds · default 0.5 · pause before text appears")
+        let pauseControl = NSStackView(views: [continuousPauseField, pauseHint])
+        pauseControl.orientation = .horizontal
+        pauseControl.spacing = 8
+        let (pauseRow, pauseLabelRef) = buildLabeledRow(
+            labelText: "Pause:", control: pauseControl, labelWidth: lw)
+        continuousPauseLabel = pauseLabelRef
+
+        continuousMaxChunkField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let maxChunkHint = PreferencesWindowController.makeHint(
+            "seconds · default 30.0 · min 5.0 · maximum speech before break")
+        let maxChunkControl = NSStackView(views: [continuousMaxChunkField, maxChunkHint])
+        maxChunkControl.orientation = .horizontal
+        maxChunkControl.spacing = 8
+        let (maxChunkRow, maxChunkLabelRef) = buildLabeledRow(
+            labelText: "Max chunk:", control: maxChunkControl, labelWidth: lw)
+        continuousMaxChunkLabel = maxChunkLabelRef
+
+        continuousPromptChainMaxCharsField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let promptCharsHint = PreferencesWindowController.makeHint(
+            "default 200 · min 100 · max 900 · higher = more context")
+        let promptCharsControl = NSStackView(views: [
+            continuousPromptChainMaxCharsField, promptCharsHint
+        ])
+        promptCharsControl.orientation = .horizontal
+        promptCharsControl.spacing = 8
+        let (promptCharsRow, promptCharsLabelRef) = buildLabeledRow(
+            labelText: "Max chars:", control: promptCharsControl, labelWidth: lw)
+        continuousPromptChainMaxCharsLabel = promptCharsLabelRef
+
+        let backend = buildSection(title: "Backend",
+                                   rows: [backendRow, modelRow, apiKeyRow])
+        let modelsFolder = buildSection(title: "Models Folder",
+                                        rows: [modelsFolderRow])
+        transcriptionModelsFolderSection = modelsFolder
+        let behavior = buildSection(title: "Behavior",
+                                    rows: [continuousStack, pauseRow, maxChunkRow,
+                                           continuousPromptChainCheckbox, promptCharsRow,
+                                           stripWhisperPunctuationCheckbox])
+
+        let inset = PreferencesWindowController.paneInset
+        let gap = PreferencesWindowController.sectionGap
+        let after1 = placeSection(backend, in: pane, below: pane.topAnchor, topConstant: inset)
+        let after2 = placeSection(modelsFolder, in: pane, below: after1, topConstant: gap)
+        let after3 = placeSection(behavior, in: pane, below: after2, topConstant: gap)
+        pane.bottomAnchor.constraint(greaterThanOrEqualTo: after3, constant: inset).isActive = true
         return pane
     }
 
@@ -572,6 +856,17 @@ final class PreferencesWindowController: NSWindowController,
     private func buildRowView(labelText: String,
                               control: NSView,
                               labelWidth: CGFloat) -> NSView {
+        return buildLabeledRow(labelText: labelText,
+                               control: control,
+                               labelWidth: labelWidth).row
+    }
+
+    // Variant that also returns the label so the delegate can toggle its
+    // text color on invalid numeric input.
+    private func buildLabeledRow(labelText: String,
+                                 control: NSView,
+                                 labelWidth: CGFloat)
+        -> (row: NSView, label: NSTextField) {
         let label = makeLabel(labelText)
         control.translatesAutoresizingMaskIntoConstraints = false
         let row = NSView()
@@ -588,250 +883,157 @@ final class PreferencesWindowController: NSWindowController,
             control.bottomAnchor.constraint(equalTo: row.bottomAnchor),
             control.trailingAnchor.constraint(equalTo: row.trailingAnchor)
         ])
-        return row
+        return (row, label)
     }
 
-    private func buildAudioPane() -> NSView {
-        let pane = NSView()
-        pane.translatesAutoresizingMaskIntoConstraints = false
-
-        silenceThresholdField.translatesAutoresizingMaskIntoConstraints = false
-        silenceThresholdField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let thresholdHint = NSTextField(frame: .zero)
-        thresholdHint.isEditable = false; thresholdHint.isSelectable = false
-        thresholdHint.isBordered = false; thresholdHint.drawsBackground = false
-        thresholdHint.textColor = .secondaryLabelColor
-        thresholdHint.stringValue = "RMS level · default 0.01 · lower = more sensitive"
-        let thresholdRow = NSStackView(views: [silenceThresholdField, thresholdHint])
-        thresholdRow.orientation = .horizontal
-        thresholdRow.spacing = 8
-
-        silenceSecondsField.translatesAutoresizingMaskIntoConstraints = false
-        silenceSecondsField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let secondsHint = NSTextField(frame: .zero)
-        secondsHint.isEditable = false; secondsHint.isSelectable = false
-        secondsHint.isBordered = false; secondsHint.drawsBackground = false
-        secondsHint.textColor = .secondaryLabelColor
-        secondsHint.stringValue = "seconds · default 4.0 · higher = more tolerant of pauses"
-        let secondsRow = NSStackView(views: [silenceSecondsField, secondsHint])
-        secondsRow.orientation = .horizontal
-        secondsRow.spacing = 8
-
-        continuousPauseField.translatesAutoresizingMaskIntoConstraints = false
-        continuousPauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let pauseHint = NSTextField(frame: .zero)
-        pauseHint.isEditable = false; pauseHint.isSelectable = false
-        pauseHint.isBordered = false; pauseHint.drawsBackground = false
-        pauseHint.textColor = .secondaryLabelColor
-        pauseHint.stringValue = "seconds · default 0.5 · pause length that cuts a chunk for transcription"
-        let pauseRow = NSStackView(views: [continuousPauseField, pauseHint])
-        pauseRow.orientation = .horizontal
-        pauseRow.spacing = 8
-
-        continuousMaxChunkField.translatesAutoresizingMaskIntoConstraints = false
-        continuousMaxChunkField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let maxChunkHint = NSTextField(frame: .zero)
-        maxChunkHint.isEditable = false; maxChunkHint.isSelectable = false
-        maxChunkHint.isBordered = false; maxChunkHint.drawsBackground = false
-        maxChunkHint.textColor = .secondaryLabelColor
-        maxChunkHint.stringValue = "seconds · default 30.0 · min 5.0 · hard cut after this much continuous speech"
-        let maxChunkRow = NSStackView(views: [continuousMaxChunkField, maxChunkHint])
-        maxChunkRow.orientation = .horizontal
-        maxChunkRow.spacing = 8
-
-        continuousPromptChainMaxCharsField.translatesAutoresizingMaskIntoConstraints = false
-        continuousPromptChainMaxCharsField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let promptCharsHint = NSTextField(frame: .zero)
-        promptCharsHint.isEditable = false; promptCharsHint.isSelectable = false
-        promptCharsHint.isBordered = false; promptCharsHint.drawsBackground = false
-        promptCharsHint.textColor = .secondaryLabelColor
-        promptCharsHint.stringValue = "characters · default 200 · min 100 · max 900 · higher = more context, slower"
-        let promptCharsRow = NSStackView(views: [continuousPromptChainMaxCharsField, promptCharsHint])
-        promptCharsRow.orientation = .horizontal
-        promptCharsRow.spacing = 8
-
-        continuousSentencePauseField.translatesAutoresizingMaskIntoConstraints = false
-        continuousSentencePauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let sentencePauseHint = NSTextField(frame: .zero)
-        sentencePauseHint.isEditable = false; sentencePauseHint.isSelectable = false
-        sentencePauseHint.isBordered = false; sentencePauseHint.drawsBackground = false
-        sentencePauseHint.textColor = .secondaryLabelColor
-        sentencePauseHint.stringValue = PreferencesWindowController.sentencePauseHintText(
-            Preferences.shared.continuousDictationSentencePauseSeconds)
-        continuousSentencePauseHint = sentencePauseHint
-        let sentencePauseRow = NSStackView(views: [continuousSentencePauseField, sentencePauseHint])
-        sentencePauseRow.orientation = .horizontal
-        sentencePauseRow.spacing = 8
-
-        let lw = PreferencesWindowController.widestLabelWidth(
-            ["Input device:", "Start sound:", "Stop sound:",
-             "Auto-stop:", "Silence threshold:", "Silence duration:",
-             "Continuous:", "Pause:", "Max chunk:",
-             "Prompt chain:", "Max chars:",
-             "Strip punctuation:", "Auto-close:",
-             "Sentence pause:"])
-        let after1 = placeRow(labelText: "Input device:", control: inputDevicePopup,
-                              in: pane, topAnchor: pane.topAnchor, topConstant: 0, labelWidth: lw)
-        let after2 = placeRow(labelText: "Start sound:", control: startSoundPopup,
-                              in: pane, topAnchor: after1,
-                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let after3 = placeRow(labelText: "Stop sound:", control: stopSoundPopup,
-                              in: pane, topAnchor: after2,
-                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let after4 = placeRow(labelText: "Auto-stop:", control: silenceAutoStopCheckbox,
-                              in: pane, topAnchor: after3,
-                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let r5 = placeRowWithLabel(labelText: "Silence threshold:", control: thresholdRow,
-                                   in: pane, topAnchor: after4,
-                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        silenceThresholdLabel = r5.label
-        let r6 = placeRowWithLabel(labelText: "Silence duration:", control: secondsRow,
-                                   in: pane, topAnchor: r5.bottom,
-                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        silenceSecondsLabel = r6.label
-        let after7 = placeRow(labelText: "Continuous:", control: continuousDictationCheckbox,
-                              in: pane, topAnchor: r6.bottom,
-                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let r8 = placeRowWithLabel(labelText: "Pause:", control: pauseRow,
-                                   in: pane, topAnchor: after7,
-                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        continuousPauseLabel = r8.label
-        let r9 = placeRowWithLabel(labelText: "Max chunk:", control: maxChunkRow,
-                                   in: pane, topAnchor: r8.bottom,
-                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        continuousMaxChunkLabel = r9.label
-        let after10 = placeRow(labelText: "Prompt chain:",
-                               control: continuousPromptChainCheckbox,
-                               in: pane, topAnchor: r9.bottom,
-                               topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let r11 = placeRowWithLabel(labelText: "Max chars:", control: promptCharsRow,
-                                    in: pane, topAnchor: after10,
-                                    topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        continuousPromptChainMaxCharsLabel = r11.label
-        let after12 = placeRow(labelText: "Strip punctuation:",
-                               control: stripWhisperPunctuationCheckbox,
-                               in: pane, topAnchor: r11.bottom,
-                               topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let after13 = placeRow(labelText: "Auto-close:",
-                               control: autoEndPeriodCheckbox,
-                               in: pane, topAnchor: after12,
-                               topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let r14 = placeRowWithLabel(labelText: "Sentence pause:", control: sentencePauseRow,
-                                    in: pane, topAnchor: after13,
-                                    topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        continuousSentencePauseLabel = r14.label
-        pane.bottomAnchor.constraint(equalTo: r14.bottom).isActive = true
-        return pane
-    }
-
-    private static func sentencePauseHintText(_ p: Double) -> String {
-        return String(format: "seconds · default 1.0 · new-sentence window [%.1f, %.1f] · trailing period at %.1f",
-                      p, p * 2, p * 4)
+    // Small gray hint text that sits to the right of a numeric field,
+    // e.g. "RMS level · default 0.01 · lower = more sensitive".
+    private static func makeHint(_ text: String) -> NSTextField {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false; f.isSelectable = false
+        f.isBordered = false; f.drawsBackground = false
+        f.textColor = .secondaryLabelColor
+        f.stringValue = text
+        return f
     }
 
     private func buildOutputPane() -> NSView {
-        let pane = NSView()
+        let pane = FlippedView()
         pane.translatesAutoresizingMaskIntoConstraints = false
+
+        let lw = PreferencesWindowController.widestLabelWidth(
+            ["Method:", "Typed delay:",
+             "Sentence pause:", "Window close:", "Trailing period:"])
+
         let radios = NSStackView(views: [injectionPasteRadio, injectionTypedRadio])
         radios.orientation = .horizontal
         radios.spacing = 16
+        let methodRow = buildRowView(labelText: "Method:",
+                                     control: radios, labelWidth: lw)
 
-        typedDelayField.translatesAutoresizingMaskIntoConstraints = false
         typedDelayField.widthAnchor.constraint(equalToConstant: 60).isActive = true
-        let delayHint = NSTextField(frame: .zero)
-        delayHint.isEditable = false; delayHint.isSelectable = false
-        delayHint.isBordered = false; delayHint.drawsBackground = false
-        delayHint.textColor = .secondaryLabelColor
-        delayHint.stringValue = "ms per character · default 8 · max 100 · higher = fewer dropped keystrokes"
-        let delayRow = NSStackView(views: [typedDelayField, typedDelayStepper, delayHint])
-        delayRow.orientation = .horizontal
-        delayRow.spacing = 8
+        let delayHint = PreferencesWindowController.makeHint(
+            "ms per character · default 8 · max 100 = slower keystrokes")
+        let delayControl = NSStackView(views: [typedDelayField, typedDelayStepper, delayHint])
+        delayControl.orientation = .horizontal
+        delayControl.spacing = 8
+        let (delayRow, delayLabelRef) = buildLabeledRow(
+            labelText: "Typed delay:", control: delayControl, labelWidth: lw)
+        typedDelayLabel = delayLabelRef
 
-        let lw = PreferencesWindowController.widestLabelWidth(
-            ["Text insertion:", "Typed delay:"])
-        let after1 = placeRow(labelText: "Text insertion:", control: radios,
-                              in: pane, topAnchor: pane.topAnchor, topConstant: 0, labelWidth: lw)
-        let r2 = placeRowWithLabel(labelText: "Typed delay:", control: delayRow,
-                                   in: pane, topAnchor: after1,
-                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        typedDelayLabel = r2.label
-        pane.bottomAnchor.constraint(equalTo: r2.bottom).isActive = true
-        return pane
-    }
+        continuousSentencePauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let sentencePauseControl = NSStackView(views: [
+            continuousSentencePauseField,
+            continuousSentencePauseStepper,
+            PreferencesWindowController.makeHint("seconds · default 1.0")
+        ])
+        sentencePauseControl.orientation = .horizontal
+        sentencePauseControl.spacing = 8
+        let (sentencePauseRow, sentencePauseLabelRef) = buildLabeledRow(
+            labelText: "Sentence pause:", control: sentencePauseControl, labelWidth: lw)
+        continuousSentencePauseLabel = sentencePauseLabelRef
 
-    private func buildInterfacePane() -> NSView {
-        let pane = NSView()
-        pane.translatesAutoresizingMaskIntoConstraints = false
-        let lw = PreferencesWindowController.widestLabelWidth(["Appearance:"])
-        let after1 = placeRow(labelText: "Appearance:", control: coloredIconCheckbox,
-                              in: pane, topAnchor: pane.topAnchor, topConstant: 0, labelWidth: lw)
-        pane.bottomAnchor.constraint(equalTo: after1).isActive = true
+        continuousSentencePauseMaxField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let sentencePauseMaxControl = NSStackView(views: [
+            continuousSentencePauseMaxField,
+            continuousSentencePauseMaxStepper,
+            PreferencesWindowController.makeHint("seconds · default 2.0")
+        ])
+        sentencePauseMaxControl.orientation = .horizontal
+        sentencePauseMaxControl.spacing = 8
+        let (sentencePauseMaxRow, sentencePauseMaxLabelRef) = buildLabeledRow(
+            labelText: "Window close:", control: sentencePauseMaxControl, labelWidth: lw)
+        continuousSentencePauseMaxLabel = sentencePauseMaxLabelRef
+
+        continuousTrailingPeriodField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let trailingPeriodControl = NSStackView(views: [
+            continuousTrailingPeriodField,
+            continuousTrailingPeriodStepper,
+            PreferencesWindowController.makeHint("seconds · default 4.0")
+        ])
+        trailingPeriodControl.orientation = .horizontal
+        trailingPeriodControl.spacing = 8
+        let (trailingPeriodRow, trailingPeriodLabelRef) = buildLabeledRow(
+            labelText: "Trailing period:", control: trailingPeriodControl, labelWidth: lw)
+        continuousTrailingPeriodLabel = trailingPeriodLabelRef
+
+        let notesText = PreferencesWindowController.makeCaption(
+            "Typed insertion is slower but can work better in apps where paste is unreliable.")
+
+        let textInsertion = buildSection(title: "Text Insertion",
+                                         rows: [methodRow, delayRow])
+        let sentenceHandling = buildSection(title: "Sentence Handling",
+                                            rows: [autoEndPeriodCheckbox,
+                                                   sentencePauseRow,
+                                                   sentencePauseMaxRow,
+                                                   trailingPeriodRow])
+        let notes = buildSection(title: "Notes", rows: [notesText])
+
+        let inset = PreferencesWindowController.paneInset
+        let gap = PreferencesWindowController.sectionGap
+        let after1 = placeSection(textInsertion, in: pane, below: pane.topAnchor, topConstant: inset)
+        let after2 = placeSection(sentenceHandling, in: pane, below: after1, topConstant: gap)
+        let after3 = placeSection(notes, in: pane, below: after2, topConstant: gap)
+        pane.bottomAnchor.constraint(greaterThanOrEqualTo: after3, constant: inset).isActive = true
         return pane
     }
 
     private func buildAdvancedPane() -> NSView {
-        let pane = NSView()
+        let pane = FlippedView()
         pane.translatesAutoresizingMaskIntoConstraints = false
 
-        threadsField.translatesAutoresizingMaskIntoConstraints = false
+        let lw = PreferencesWindowController.widestLabelWidth(
+            ["Transcription threads:", "Accuracy:"])
+
         threadsField.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        let threadsHint = PreferencesWindowController.makeHint(
+            PreferencesWindowController.threadsHintString())
+        let threadsControl = NSStackView(views: [threadsField, threadsStepper, threadsHint])
+        threadsControl.orientation = .horizontal
+        threadsControl.spacing = 8
+        let (threadsRow, threadsLabelRef) = buildLabeledRow(
+            labelText: "Transcription threads:", control: threadsControl, labelWidth: lw)
+        threadsLabel = threadsLabelRef
 
-        let threadsHint = NSTextField(frame: .zero)
-        threadsHint.isEditable = false; threadsHint.isSelectable = false
-        threadsHint.isBordered = false; threadsHint.drawsBackground = false
-        threadsHint.textColor = .secondaryLabelColor
-        threadsHint.stringValue = PreferencesWindowController.threadsHintString()
-
-        let threadsRow = NSStackView(views: [threadsField, threadsStepper, threadsHint])
-        threadsRow.orientation = .horizontal
-        threadsRow.spacing = 8
-
-        beamField.translatesAutoresizingMaskIntoConstraints = false
         beamField.widthAnchor.constraint(equalToConstant: 60).isActive = true
-
-        let beamHint = NSTextField(frame: .zero)
-        beamHint.isEditable = false; beamHint.isSelectable = false
-        beamHint.isBordered = false; beamHint.drawsBackground = false
-        beamHint.textColor = .secondaryLabelColor
-        beamHint.stringValue = "1 = fastest · 3 = default · 10 = slowest"
-
-        let beamRow = NSStackView(views: [beamField, beamStepper, beamHint])
-        beamRow.orientation = .horizontal
-        beamRow.spacing = 8
+        let beamHint = PreferencesWindowController.makeHint(
+            "1 = fastest · 3 = default · 10 = slowest")
+        let beamControl = NSStackView(views: [beamField, beamStepper, beamHint])
+        beamControl.orientation = .horizontal
+        beamControl.spacing = 8
+        let (beamRow, beamLabelRef) = buildLabeledRow(
+            labelText: "Accuracy:", control: beamControl, labelWidth: lw)
+        beamLabel = beamLabelRef
 
         let debugRow = NSStackView(views: [saveDebugRecordingsCheckbox,
                                            clearDebugRecordingsButton])
         debugRow.orientation = .horizontal
         debugRow.spacing = 12
-
         let loggingRow = NSStackView(views: [logEverythingCheckbox, clearLogButton])
         loggingRow.orientation = .horizontal
         loggingRow.spacing = 12
 
-        let lw = PreferencesWindowController.widestLabelWidth(
-            ["Transcription threads:", "Accuracy:", "Debug recordings:", "Logging:",
-             "Preferences:"])
+        let resetStack = NSStackView(views: [
+            resetDefaultsButton,
+            PreferencesWindowController.makeCaption(
+                "Restores all preferences to their original values.")
+        ])
+        resetStack.orientation = .vertical
+        resetStack.alignment = .leading
+        resetStack.spacing = 4
 
-        let r1 = placeRowWithLabel(labelText: "Transcription threads:", control: threadsRow,
-                                   in: pane, topAnchor: pane.topAnchor, topConstant: 0,
-                                   labelWidth: lw)
-        threadsLabel = r1.label
-        let after1 = r1.bottom
-        let r2 = placeRowWithLabel(labelText: "Accuracy:", control: beamRow,
-                                   in: pane, topAnchor: after1,
-                                   topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        beamLabel = r2.label
-        let after2 = r2.bottom
-        let after3 = placeRow(labelText: "Debug recordings:", control: debugRow,
-                              in: pane, topAnchor: after2,
-                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let after4 = placeRow(labelText: "Logging:", control: loggingRow,
-                              in: pane, topAnchor: after3,
-                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        let after5 = placeRow(labelText: "Preferences:", control: resetDefaultsButton,
-                              in: pane, topAnchor: after4,
-                              topConstant: PreferencesWindowController.rowGap, labelWidth: lw)
-        pane.bottomAnchor.constraint(equalTo: after5).isActive = true
+        let performance = buildSection(title: "Performance",
+                                       rows: [threadsRow, beamRow])
+        let diagnostics = buildSection(title: "Diagnostics",
+                                       rows: [debugRow, loggingRow])
+        let reset = buildSection(title: "Reset", rows: [resetStack])
+
+        let inset = PreferencesWindowController.paneInset
+        let gap = PreferencesWindowController.sectionGap
+        let after1 = placeSection(performance, in: pane, below: pane.topAnchor, topConstant: inset)
+        let after2 = placeSection(diagnostics, in: pane, below: after1, topConstant: gap)
+        let after3 = placeSection(reset, in: pane, below: after2, topConstant: gap)
+        pane.bottomAnchor.constraint(greaterThanOrEqualTo: after3, constant: inset).isActive = true
         return pane
     }
 
@@ -918,9 +1120,16 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.continuousDictationAutoEndPeriod ? .on : .off
         continuousSentencePauseField.stringValue = String(format: "%.1f",
             Preferences.shared.continuousDictationSentencePauseSeconds)
-        continuousSentencePauseHint?.stringValue =
-            PreferencesWindowController.sentencePauseHintText(
-                Preferences.shared.continuousDictationSentencePauseSeconds)
+        continuousSentencePauseStepper.doubleValue =
+            Preferences.shared.continuousDictationSentencePauseSeconds
+        continuousSentencePauseMaxField.stringValue = String(format: "%.1f",
+            Preferences.shared.continuousDictationSentencePauseMaxSeconds)
+        continuousSentencePauseMaxStepper.doubleValue =
+            Preferences.shared.continuousDictationSentencePauseMaxSeconds
+        continuousTrailingPeriodField.stringValue = String(format: "%.1f",
+            Preferences.shared.continuousDictationTrailingPeriodSeconds)
+        continuousTrailingPeriodStepper.doubleValue =
+            Preferences.shared.continuousDictationTrailingPeriodSeconds
         let typedDelay = Preferences.shared.typedKeystrokeDelayMs
         typedDelayField.integerValue = typedDelay
         typedDelayStepper.integerValue = typedDelay
@@ -1016,7 +1225,7 @@ final class PreferencesWindowController: NSWindowController,
     private func updateConditionalRows() {
         let isOpenAI = Preferences.shared.backend == .openAI
         transcriptionModelRow?.isHidden = isOpenAI
-        transcriptionModelsFolderRow?.isHidden = isOpenAI
+        transcriptionModelsFolderSection?.isHidden = isOpenAI
         transcriptionApiKeyRow?.isHidden = !isOpenAI
     }
 
@@ -1176,6 +1385,63 @@ final class PreferencesWindowController: NSWindowController,
         let value = typedDelayStepper.integerValue
         typedDelayField.integerValue = value
         Preferences.shared.typedKeystrokeDelayMs = value
+    }
+
+    @objc private func continuousSentencePauseStepperChanged() {
+        let chunkPause = Preferences.shared.continuousDictationPauseSeconds
+        let raw = continuousSentencePauseStepper.doubleValue
+        let clamped = max(chunkPause + 0.1, min(5.0, raw))
+        applyCascadingSentencePause(clamped)
+    }
+
+    @objc private func continuousSentencePauseMaxStepperChanged() {
+        let minVal = Preferences.shared.continuousDictationSentencePauseSeconds + 0.1
+        let raw = continuousSentencePauseMaxStepper.doubleValue
+        let clamped = max(minVal, min(10.0, raw))
+        continuousSentencePauseMaxField.stringValue = String(format: "%.1f", clamped)
+        Preferences.shared.continuousDictationSentencePauseMaxSeconds = clamped
+        setNumericFieldValid(field: continuousSentencePauseMaxField,
+                             label: continuousSentencePauseMaxLabel, valid: true)
+    }
+
+    @objc private func continuousTrailingPeriodStepperChanged() {
+        let minVal = Preferences.shared.continuousDictationSentencePauseMaxSeconds + 0.1
+        let raw = continuousTrailingPeriodStepper.doubleValue
+        let clamped = max(minVal, min(20.0, raw))
+        continuousTrailingPeriodField.stringValue = String(format: "%.1f", clamped)
+        Preferences.shared.continuousDictationTrailingPeriodSeconds = clamped
+        setNumericFieldValid(field: continuousTrailingPeriodField,
+                             label: continuousTrailingPeriodLabel, valid: true)
+    }
+
+    // Cascade an edit to the Sentence pause field through to Window close
+    // and Trailing period, preserving each dependent's current ratio to
+    // the old sentence-pause value. Call this whenever the sentence-pause
+    // field or stepper validates to a new value.
+    private func applyCascadingSentencePause(_ newP: Double) {
+        let prefs = Preferences.shared
+        let oldP = prefs.continuousDictationSentencePauseSeconds
+        continuousSentencePauseField.stringValue = String(format: "%.1f", newP)
+        continuousSentencePauseStepper.doubleValue = newP
+        prefs.continuousDictationSentencePauseSeconds = newP
+        setNumericFieldValid(field: continuousSentencePauseField,
+                             label: continuousSentencePauseLabel, valid: true)
+        guard oldP > 0 else { return }
+        let scale = newP / oldP
+        let newMax = min(10.0, max(newP + 0.1,
+                                   prefs.continuousDictationSentencePauseMaxSeconds * scale))
+        let newTrail = min(20.0, max(newMax + 0.1,
+                                     prefs.continuousDictationTrailingPeriodSeconds * scale))
+        prefs.continuousDictationSentencePauseMaxSeconds = newMax
+        prefs.continuousDictationTrailingPeriodSeconds = newTrail
+        continuousSentencePauseMaxField.stringValue = String(format: "%.1f", newMax)
+        continuousSentencePauseMaxStepper.doubleValue = newMax
+        continuousTrailingPeriodField.stringValue = String(format: "%.1f", newTrail)
+        continuousTrailingPeriodStepper.doubleValue = newTrail
+        setNumericFieldValid(field: continuousSentencePauseMaxField,
+                             label: continuousSentencePauseMaxLabel, valid: true)
+        setNumericFieldValid(field: continuousTrailingPeriodField,
+                             label: continuousTrailingPeriodLabel, valid: true)
     }
 
     @objc private func saveDebugRecordingsChanged() {
@@ -1388,15 +1654,47 @@ final class PreferencesWindowController: NSWindowController,
             refreshModelPopup()
             return
         }
-        validateNumericField(field)
+        // Numeric fields: per-keystroke, only color the field red/normal
+        // based on current validity. Do NOT write to prefs or cascade here;
+        // intermediate states while typing (e.g. "1." on the way to "1.2")
+        // would otherwise overwrite the field's stringValue mid-edit.
+        markNumericFieldValidity(field)
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let field = obj.object as? NSTextField else { return }
         if field === apiKeyField || field === modelsFolderField { return }
-        if numericFieldIsValid(field) { return }
-        NSSound.beep()
-        revertNumericFieldToPref(field)
+        // Commit point: on Enter / Tab / blur. Write to prefs, sync steppers,
+        // apply cascades if valid; beep + revert if not.
+        if numericFieldIsValid(field) {
+            validateNumericField(field)
+        } else {
+            NSSound.beep()
+            revertNumericFieldToPref(field)
+        }
+    }
+
+    // Visual-only: color the given numeric field (and its captured label)
+    // red if the current text fails `numericFieldIsValid`, normal otherwise.
+    // Lookup table mirrors the numeric fields validated elsewhere.
+    private func markNumericFieldValidity(_ field: NSTextField) {
+        let valid = numericFieldIsValid(field)
+        let label: NSTextField?
+        switch field {
+        case threadsField: label = threadsLabel
+        case beamField: label = beamLabel
+        case typedDelayField: label = typedDelayLabel
+        case silenceThresholdField: label = silenceThresholdLabel
+        case silenceSecondsField: label = silenceSecondsLabel
+        case continuousPauseField: label = continuousPauseLabel
+        case continuousMaxChunkField: label = continuousMaxChunkLabel
+        case continuousPromptChainMaxCharsField: label = continuousPromptChainMaxCharsLabel
+        case continuousSentencePauseField: label = continuousSentencePauseLabel
+        case continuousSentencePauseMaxField: label = continuousSentencePauseMaxLabel
+        case continuousTrailingPeriodField: label = continuousTrailingPeriodLabel
+        default: return
+        }
+        setNumericFieldValid(field: field, label: label, valid: valid)
     }
 
     private func validateNumericField(_ field: NSTextField) {
@@ -1476,14 +1774,34 @@ final class PreferencesWindowController: NSWindowController,
             let chunkPause = Preferences.shared.continuousDictationPauseSeconds
             if let v = Double(continuousSentencePauseField.stringValue),
                v > chunkPause, v <= 5.0 {
-                Preferences.shared.continuousDictationSentencePauseSeconds = v
-                setNumericFieldValid(field: continuousSentencePauseField,
-                                     label: continuousSentencePauseLabel, valid: true)
-                continuousSentencePauseHint?.stringValue =
-                    PreferencesWindowController.sentencePauseHintText(v)
+                applyCascadingSentencePause(v)
             } else {
                 setNumericFieldValid(field: continuousSentencePauseField,
                                      label: continuousSentencePauseLabel, valid: false)
+            }
+        case continuousSentencePauseMaxField:
+            let minVal = Preferences.shared.continuousDictationSentencePauseSeconds
+            if let v = Double(continuousSentencePauseMaxField.stringValue),
+               v > minVal, v <= 10.0 {
+                Preferences.shared.continuousDictationSentencePauseMaxSeconds = v
+                continuousSentencePauseMaxStepper.doubleValue = v
+                setNumericFieldValid(field: continuousSentencePauseMaxField,
+                                     label: continuousSentencePauseMaxLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: continuousSentencePauseMaxField,
+                                     label: continuousSentencePauseMaxLabel, valid: false)
+            }
+        case continuousTrailingPeriodField:
+            let minVal = Preferences.shared.continuousDictationSentencePauseMaxSeconds
+            if let v = Double(continuousTrailingPeriodField.stringValue),
+               v > minVal, v <= 20.0 {
+                Preferences.shared.continuousDictationTrailingPeriodSeconds = v
+                continuousTrailingPeriodStepper.doubleValue = v
+                setNumericFieldValid(field: continuousTrailingPeriodField,
+                                     label: continuousTrailingPeriodLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: continuousTrailingPeriodField,
+                                     label: continuousTrailingPeriodLabel, valid: false)
             }
         default:
             break
@@ -1521,6 +1839,14 @@ final class PreferencesWindowController: NSWindowController,
             let chunkPause = Preferences.shared.continuousDictationPauseSeconds
             guard let v = Double(continuousSentencePauseField.stringValue) else { return false }
             return v > chunkPause && v <= 5.0
+        case continuousSentencePauseMaxField:
+            let minVal = Preferences.shared.continuousDictationSentencePauseSeconds
+            guard let v = Double(continuousSentencePauseMaxField.stringValue) else { return false }
+            return v > minVal && v <= 10.0
+        case continuousTrailingPeriodField:
+            let minVal = Preferences.shared.continuousDictationSentencePauseMaxSeconds
+            guard let v = Double(continuousTrailingPeriodField.stringValue) else { return false }
+            return v > minVal && v <= 20.0
         default:
             return true
         }
@@ -1571,11 +1897,24 @@ final class PreferencesWindowController: NSWindowController,
         case continuousSentencePauseField:
             continuousSentencePauseField.stringValue = String(format: "%.1f",
                 Preferences.shared.continuousDictationSentencePauseSeconds)
+            continuousSentencePauseStepper.doubleValue =
+                Preferences.shared.continuousDictationSentencePauseSeconds
             setNumericFieldValid(field: continuousSentencePauseField,
                                  label: continuousSentencePauseLabel, valid: true)
-            continuousSentencePauseHint?.stringValue =
-                PreferencesWindowController.sentencePauseHintText(
-                    Preferences.shared.continuousDictationSentencePauseSeconds)
+        case continuousSentencePauseMaxField:
+            continuousSentencePauseMaxField.stringValue = String(format: "%.1f",
+                Preferences.shared.continuousDictationSentencePauseMaxSeconds)
+            continuousSentencePauseMaxStepper.doubleValue =
+                Preferences.shared.continuousDictationSentencePauseMaxSeconds
+            setNumericFieldValid(field: continuousSentencePauseMaxField,
+                                 label: continuousSentencePauseMaxLabel, valid: true)
+        case continuousTrailingPeriodField:
+            continuousTrailingPeriodField.stringValue = String(format: "%.1f",
+                Preferences.shared.continuousDictationTrailingPeriodSeconds)
+            continuousTrailingPeriodStepper.doubleValue =
+                Preferences.shared.continuousDictationTrailingPeriodSeconds
+            setNumericFieldValid(field: continuousTrailingPeriodField,
+                                 label: continuousTrailingPeriodLabel, valid: true)
         default:
             break
         }
@@ -1795,3 +2134,5 @@ fileprivate enum LaunchAtLogin {
         try? FileManager.default.removeItem(at: plistURL)
     }
 }
+
+

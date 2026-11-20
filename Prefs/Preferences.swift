@@ -46,6 +46,8 @@ final class Preferences {
         static let continuousDictationStripWhisperPunctuation = "continuousDictationStripWhisperPunctuation"
         static let continuousDictationAutoEndPeriod = "continuousDictationAutoEndPeriod"
         static let continuousDictationSentencePauseSeconds = "continuousDictationSentencePauseSeconds"
+        static let continuousDictationSentencePauseMaxSeconds = "continuousDictationSentencePauseMaxSeconds"
+        static let continuousDictationTrailingPeriodSeconds = "continuousDictationTrailingPeriodSeconds"
     }
 
     static let noSoundName = "None"
@@ -249,17 +251,40 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.continuousDictationAutoEndPeriod) }
     }
 
-    // Strip-punctuation mode. The master timing knob. Window opens at
-    // this value and closes at 2x. A chunk arriving with gap in
-    // [1x, 2x] gets `". "` + capital. Beyond 2x is a dead zone
-    // (continuation). The trailing-period timer fires at 4x of total
-    // silence from speech-end.
+    // Strip-punctuation mode. The master timing knob (`P`). New-sentence
+    // window opens when a chunk's preceding gap is >= this value.
+    // Editing this in the UI cascades the max / trailing fields
+    // proportionally so the user-set ratio between them is preserved.
     var continuousDictationSentencePauseSeconds: Double {
         get {
             let stored = defaults.double(forKey: Key.continuousDictationSentencePauseSeconds)
             return stored == 0 ? 1.0 : stored
         }
         set { defaults.set(newValue, forKey: Key.continuousDictationSentencePauseSeconds) }
+    }
+
+    // Strip-punctuation mode. The new-sentence window closes at this
+    // value; gaps longer than this fall into the "dead zone" where a
+    // resuming chunk gets `" "` continuation instead of `". "` + capital.
+    // Default 2.0 (2x the sentence-pause default). Independently editable.
+    var continuousDictationSentencePauseMaxSeconds: Double {
+        get {
+            let stored = defaults.double(forKey: Key.continuousDictationSentencePauseMaxSeconds)
+            return stored == 0 ? 2.0 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationSentencePauseMaxSeconds) }
+    }
+
+    // Strip-punctuation mode. When auto-end-period is on, this many
+    // seconds of silence from speech-end triggers injection of a closing
+    // `.`. Default 4.0 (4x the sentence-pause default). Independently
+    // editable.
+    var continuousDictationTrailingPeriodSeconds: Double {
+        get {
+            let stored = defaults.double(forKey: Key.continuousDictationTrailingPeriodSeconds)
+            return stored == 0 ? 4.0 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationTrailingPeriodSeconds) }
     }
 
     // Words / tokens that the post-processing casing normalizer would
@@ -282,7 +307,7 @@ final class Preferences {
         "URL", "URI", "SSH", "FTP", "TCP", "UDP", "DNS", "CPU", "GPU", "RAM",
         "USB", "PDF", "PNG", "JPEG", "GIF", "SVG", "SSD", "HDD",
         "GitHub", "GitLab", "macOS", "iOS", "iPadOS", "watchOS", "tvOS",
-        "iCloud", "iPhone", "iPad", "iMac", "MacBook",
+        "iCloud", "iPhone", "iPad", "iMac", "MacBook", "Macbook Pro", "Mac Pro",
         "Monterey", "Ventura", "Sonoma", "Sequoia", "Catalina", "Mojave",
         "Big Sur", "High Sierra", "El Capitan",
         "YouTube", "Google", "Apple", "Microsoft", "Linux",
@@ -290,6 +315,7 @@ final class Preferences {
         "Python", "JavaScript", "TypeScript", "Swift", "Node.js", "npm",
         "USA", "UK", "EU", "UAE",
         "NASA", "FBI", "CIA", "NATO", "OPEC", "UNESCO", "UNICEF", "NGO", "GDP",
+        "PSW", "DF", "CPA", "SCIO", "ODSP", "OSAP",
         "Wi-Fi", "Bluetooth", "Ethernet",
         "NLP", "LLM", "GPT", "TPU", "CUDA",
         "OpenGL", "OpenCL", "Vulkan",
@@ -312,14 +338,14 @@ final class Preferences {
         "St. John's", "Halifax", "Charlottetown", "Quebec City", "Regina",
         "Toronto", "Vancouver", "Calgary",
         "America", "United States", "D.C.", "D.C", "DC",
-        "Alabama", "Alaska", "Arizona", "Arkansas", "California",
-        "Colorado", "Connecticut", "Delaware", "Florida", "Georgia",
+        "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Los Angeles",
+        "San Diego", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia",
         "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa",
         "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland",
         "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri",
         "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey",
         "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio",
-        "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina",
+        "Oklahoma", "Oregon", "Portland", "Pennsylvania", "Rhode Island", "South Carolina",
         "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
         "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
         "Montgomery", "Juneau", "Phoenix", "Little Rock", "Sacramento",
@@ -333,7 +359,8 @@ final class Preferences {
         "Columbia", "Pierre", "Nashville", "Austin", "Salt Lake City",
         "Montpelier", "Richmond", "Olympia", "Charleston", "Madison",
         "Cheyenne",
-        "Michael", "Andy", "Dylan", "Raymond", "Johnson", "Jonathan",
+        "Michael", "Andy", "Vasko", "Anujan", "Dylan", "Dave", "David",
+        "Raymond", "Johnson", "Jonathan", "Nick", "Brandon",
         "Derek", "Emily", "Sarah", "Bill", "Curtis", "Curtiss",
         "Billy", "Holly", "Laura", "Andrew", "Tyson", "Jenny",
         "Jennifer", "Maria", "Jane", "Marie", "Sean", "Shawn",
@@ -355,6 +382,19 @@ final class Preferences {
     }
 
     static let defaultTextSubstitutions: [(String, String)] = [
+        ("andi", "Andy"),
+        ("vasco", "Vasko"),
+        ("A new June", "Anujan"),
+        ("anujin", "Anujan"),
+        ("a newgen", "Anujan"),
+        ("a new gen", "Anujan"),
+        ("a new gin", "Anujan"),
+        ("a.m.", "am"),
+        ("p.m.", "pm"),
+        ("a.m", "am"),
+        ("p.m", "pm"),
+        ("A.m", "am"),
+        ("P.m", "pm"),
         ("mac os", "macOS"),
         ("kilobits per second", "Kbps"),
         ("megabits per second", "Mbps"),
@@ -540,7 +580,9 @@ final class Preferences {
         Key.continuousDictationPromptChainMaxChars,
         Key.continuousDictationStripWhisperPunctuation,
         Key.continuousDictationAutoEndPeriod,
-        Key.continuousDictationSentencePauseSeconds
+        Key.continuousDictationSentencePauseSeconds,
+        Key.continuousDictationSentencePauseMaxSeconds,
+        Key.continuousDictationTrailingPeriodSeconds
     ]
 
     // MARK: - Keychain
