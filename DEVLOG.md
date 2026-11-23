@@ -1265,3 +1265,17 @@ Preferences this reuses: `continuousDictationAutoEndPeriod` and `continuousDicta
 **Help popovers.** New `HelpButton` and `HelpPopoverViewController` classes at file scope. Round `?` button next to non-obvious settings reveals an NSPopover with plain-text ELI5 explanations. Deployed on: Silence level, Silence duration, Pause, Max chunk, Sentence pause, Window threshold, Strip whisper punctuation, Feed prior transcript, Max chars, Method (paste/typed), Typed delay, Auto trailing period, Trailing period, Transcription threads, Accuracy. Obvious settings (Hotkey, Launch at login, Input device, sound popups, backend selector, Local model, API key, Backup/Restore, Save debug recordings, Log everything, Auto stop checkbox, Continuous dictation checkbox) have no help button. The Output tab's "Notes" caption was removed since its text about typed insertion now lives in the Method help popover.
 
 `HelpPopoverViewController` configures its `NSTextField` manually (word wrap, max layout width, non-editable) because the 10.12+ `wrappingLabelWithString` convenience initializer isn't available at the 10.11 deployment target.
+
+#### Transcript Processing: per-pass gating with raw bypass
+
+New Advanced tab section exposes the post-processing pipeline as six user-toggleable passes. Root checkbox `Apply transcript processing` (default on); when off, `postProcessTranscript` returns whisper's raw transcript verbatim. When on, five nested checkboxes each gate one pass independently:
+
+- `Remove non-speech annotations`: the `[BLANK_AUDIO]` / `(soft music)` / `*cough*` / leading `>>` / trailing `...` strip regexes.
+- `Normalize capitalization`: the regex-based casing pass plus the `i` / `i'll` re-uppercase.
+- `Capitalize nouns`: the hardcoded proper-noun fixup list (`applyCapitalizationFixups`).
+- `Capitalize abbreviations`: the hardcoded text-substitutions list (`applyTextSubstitutions`).
+- `Capitalize first letter at line start`: the standard-mode cursor-aware first-letter uppercasing.
+
+Six new booleans in `Preferences.swift`, all defaulting to true, all registered in `allUserDefaultsKeys`. Pref storage keys (`transcriptProcessingEnabled`, `removeNonSpeechAnnotations`, `normalizeCapitalization`, `applyProperNounFixups`, `applyTextSubstitutions`, `capitalizeFirstLetterAtLineStart`) are internal and do not need to mirror UI label changes.
+
+UI: `updateTranscriptProcessingControls()` greys out the five nested checkboxes when the root is off (pref values preserved). New `makeIndentedRow(views:indent:)` helper visually indents the children 20pt beneath the root. Each checkbox has its own help popover using the existing `HelpButton` infrastructure. Deliberately independent of `continuousDictationStripWhisperPunctuation`, `continuousDictationAutoEndPeriod`, `continuousDictationPromptChainEnabled`, and the continuous-dictation master checkbox: none of those are affected by the five new passes.

@@ -179,6 +179,43 @@ final class PreferencesWindowController: NSWindowController,
     private let typedDelayField = NSTextField()
     private let typedDelayStepper = NSStepper()
 
+    private let transcriptProcessingCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Apply transcript processing"
+        return b
+    }()
+    private let removeNonSpeechAnnotationsCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Remove non-speech annotations"
+        return b
+    }()
+    private let normalizeCapitalizationCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Normalize capitalization"
+        return b
+    }()
+    private let applyProperNounFixupsCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Capitalize nouns"
+        return b
+    }()
+    private let applyTextSubstitutionsCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Capitalize abbreviations"
+        return b
+    }()
+    private let capitalizeFirstLetterCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Capitalize first letter at line start"
+        return b
+    }()
+
     // Labels for numeric fields that use range validation. Captured during
     // layout so the delegate can toggle their text color on invalid input.
     private var threadsLabel: NSTextField?
@@ -345,6 +382,19 @@ final class PreferencesWindowController: NSWindowController,
         stripWhisperPunctuationCheckbox.action = #selector(stripWhisperPunctuationChanged)
         autoEndPeriodCheckbox.target = self
         autoEndPeriodCheckbox.action = #selector(autoEndPeriodChanged)
+
+        transcriptProcessingCheckbox.target = self
+        transcriptProcessingCheckbox.action = #selector(transcriptProcessingChanged)
+        removeNonSpeechAnnotationsCheckbox.target = self
+        removeNonSpeechAnnotationsCheckbox.action = #selector(removeNonSpeechAnnotationsChanged)
+        normalizeCapitalizationCheckbox.target = self
+        normalizeCapitalizationCheckbox.action = #selector(normalizeCapitalizationChanged)
+        applyProperNounFixupsCheckbox.target = self
+        applyProperNounFixupsCheckbox.action = #selector(applyProperNounFixupsChanged)
+        applyTextSubstitutionsCheckbox.target = self
+        applyTextSubstitutionsCheckbox.action = #selector(applyTextSubstitutionsChanged)
+        capitalizeFirstLetterCheckbox.target = self
+        capitalizeFirstLetterCheckbox.action = #selector(capitalizeFirstLetterChanged)
         continuousSentencePauseField.delegate = self
         continuousSentencePauseStepper.minValue = 0.1
         continuousSentencePauseStepper.maxValue = 5.0
@@ -1260,19 +1310,134 @@ final class PreferencesWindowController: NSWindowController,
         resetStack.alignment = .leading
         resetStack.spacing = 4
 
+        let processingRootHelp = HelpButton(text:
+            "Governs whether the app cleans up whisper's raw output " +
+            "before injecting it. When off, whisper's transcript lands " +
+            "in your document exactly as emitted (including any stray " +
+            "annotations like \"[BLANK_AUDIO]\" or \"*cough*\" and " +
+            "whisper's own choices about capitalization).\n\n" +
+            "When on, each of the five passes below runs independently " +
+            "according to its own checkbox. For most users, leave this " +
+            "and all five below on. The granular toggles are useful " +
+            "for debugging or if a specific pass is destroying content " +
+            "you want preserved.")
+
+        let removeAnnotationsHelp = HelpButton(text:
+            "Strips the non-speech markers whisper inserts when audio " +
+            "goes silent or picks up non-speech sound.\n\n" +
+            "Examples of what gets removed: \"[BLANK_AUDIO]\", " +
+            "\"[MUSIC]\", \"(soft music)\", \"(laughter)\", \"*cough*\", " +
+            "\"*laughs*\", leading \">>\" artifacts, and trailing " +
+            "\"...\" that whisper uses to mark a partial phrase.\n\n" +
+            "Turn off only if you're specifically trying to see these " +
+            "markers for debugging.")
+
+        let normalizeCapHelp = HelpButton(text:
+            "Lowercases any capital letter that isn't at a sentence " +
+            "start (after a period, question mark, or exclamation " +
+            "mark). Whisper's natural sentence-start capitals are " +
+            "preserved. The pronoun \"i\" and its contractions " +
+            "(\"i'll\", \"i've\", \"i'm\", \"i'd\") are then re-uppercased.\n\n" +
+            "Why: whisper's title-casing and shouty-case tendencies " +
+            "produce text like \"Hello World, This Is A Test\" that " +
+            "most users don't want. This folds everything to clean " +
+            "sentence case.\n\n" +
+            "Turn off if you want whisper's casing preserved as-is " +
+            "(e.g. for code dictation where capitalization matters).")
+
+        let fixupsHelp = HelpButton(text:
+            "After capitalization is normalized, this re-raises known " +
+            "proper nouns and brand names to their canonical form.\n\n" +
+            "Examples: \"john\" becomes \"John\", \"toronto\" becomes " +
+            "\"Toronto\", \"node.js\" becomes \"Node.js\", \"macos\" " +
+            "becomes \"macOS\". Covers common first and last names, " +
+            "major cities, US states and capitals, Canadian provinces " +
+            "and capitals, and tech brand names.\n\n" +
+            "Turn off if the hardcoded list is causing unwanted " +
+            "rewrites for your use case.")
+
+        let substitutionsHelp = HelpButton(text:
+            "Rewrites spoken forms to their canonical capitalized " +
+            "abbreviations and multi-word brand names.\n\n" +
+            "Examples: \"megabytes\" becomes \"MB\", \"kilobytes\" " +
+            "becomes \"KB\", \"mac os\" becomes \"macOS\", \"st johns\" " +
+            "becomes \"St. John's\". Covers unit shortforms and " +
+            "multi-word names that the single-word Capitalize nouns " +
+            "pass can't handle.\n\n" +
+            "Turn off if you want the spoken form preserved verbatim.")
+
+        let firstLetterHelp = HelpButton(text:
+            "In standard (non-continuous) dictation only. When the " +
+            "cursor is at the start of a line (empty field, or " +
+            "immediately after Enter), the first letter of the " +
+            "dictated text is capitalized.\n\n" +
+            "When the cursor is mid-line (inline dictation), the " +
+            "first letter stays lowercase so your dictation joins " +
+            "cleanly onto existing text.\n\n" +
+            "Turn off if you prefer whisper's own first-letter " +
+            "decision to stand regardless of cursor position.")
+
+        let processingRootRow = NSStackView(views: [
+            transcriptProcessingCheckbox, processingRootHelp
+        ])
+        processingRootRow.orientation = .horizontal
+        processingRootRow.spacing = 8
+        processingRootRow.alignment = .centerY
+
+        let indent: CGFloat = 20
+        let removeAnnotationsRow = makeIndentedRow(
+            views: [removeNonSpeechAnnotationsCheckbox, removeAnnotationsHelp], indent: indent)
+        let normalizeCapRow = makeIndentedRow(
+            views: [normalizeCapitalizationCheckbox, normalizeCapHelp], indent: indent)
+        let fixupsRow = makeIndentedRow(
+            views: [applyProperNounFixupsCheckbox, fixupsHelp], indent: indent)
+        let substitutionsRow = makeIndentedRow(
+            views: [applyTextSubstitutionsCheckbox, substitutionsHelp], indent: indent)
+        let firstLetterRow = makeIndentedRow(
+            views: [capitalizeFirstLetterCheckbox, firstLetterHelp], indent: indent)
+
         let performance = buildSection(title: "Performance",
                                        rows: [threadsRow, beamRow])
         let diagnostics = buildSection(title: "Diagnostics",
                                        rows: [debugRow, loggingRow])
+        let processing = buildSection(title: "Transcript Processing",
+                                      rows: [processingRootRow,
+                                             removeAnnotationsRow,
+                                             normalizeCapRow,
+                                             fixupsRow,
+                                             substitutionsRow,
+                                             firstLetterRow])
         let reset = buildSection(title: "Reset", rows: [resetStack])
 
         let inset = PreferencesWindowController.paneInset
         let gap = PreferencesWindowController.sectionGap
         let after1 = placeSection(performance, in: pane, below: pane.topAnchor, topConstant: inset)
         let after2 = placeSection(diagnostics, in: pane, below: after1, topConstant: gap)
-        let after3 = placeSection(reset, in: pane, below: after2, topConstant: gap)
-        pane.bottomAnchor.constraint(greaterThanOrEqualTo: after3, constant: inset).isActive = true
+        let after3 = placeSection(processing, in: pane, below: after2, topConstant: gap)
+        let after4 = placeSection(reset, in: pane, below: after3, topConstant: gap)
+        pane.bottomAnchor.constraint(greaterThanOrEqualTo: after4, constant: inset).isActive = true
         return pane
+    }
+
+    // Wraps a row of controls with left padding so nested checkboxes read
+    // as indented beneath their parent toggle.
+    private func makeIndentedRow(views: [NSView], indent: CGFloat) -> NSView {
+        let inner = NSStackView(views: views)
+        inner.orientation = .horizontal
+        inner.spacing = 8
+        inner.alignment = .centerY
+        inner.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(inner)
+        NSLayoutConstraint.activate([
+            inner.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: indent),
+            inner.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
+            inner.topAnchor.constraint(equalTo: container.topAnchor),
+            inner.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        return container
     }
 
     // MARK: - Sidebar table
@@ -1379,6 +1544,18 @@ final class PreferencesWindowController: NSWindowController,
         let typedDelay = Preferences.shared.typedKeystrokeDelayMs
         typedDelayField.integerValue = typedDelay
         typedDelayStepper.integerValue = typedDelay
+        transcriptProcessingCheckbox.state =
+            Preferences.shared.transcriptProcessingEnabled ? .on : .off
+        removeNonSpeechAnnotationsCheckbox.state =
+            Preferences.shared.removeNonSpeechAnnotations ? .on : .off
+        normalizeCapitalizationCheckbox.state =
+            Preferences.shared.normalizeCapitalization ? .on : .off
+        applyProperNounFixupsCheckbox.state =
+            Preferences.shared.applyProperNounFixups ? .on : .off
+        applyTextSubstitutionsCheckbox.state =
+            Preferences.shared.applyTextSubstitutions ? .on : .off
+        capitalizeFirstLetterCheckbox.state =
+            Preferences.shared.capitalizeFirstLetterAtLineStart ? .on : .off
         updateConditionalRows()
     }
 
@@ -1475,6 +1652,20 @@ final class PreferencesWindowController: NSWindowController,
         transcriptionApiKeyRow?.isHidden = !isOpenAI
         updateContinuousDictationControls()
         updateSilenceDetectionControls()
+        updateTranscriptProcessingControls()
+    }
+
+    private func updateTranscriptProcessingControls() {
+        // Root off = whisper's raw output is passed through verbatim.
+        // Grey the five nested passes to reflect that none of them fire,
+        // even though their individual pref values stay intact so the
+        // user's choices come back when the root is re-enabled.
+        let enabled = transcriptProcessingCheckbox.state == .on
+        removeNonSpeechAnnotationsCheckbox.isEnabled = enabled
+        normalizeCapitalizationCheckbox.isEnabled = enabled
+        applyProperNounFixupsCheckbox.isEnabled = enabled
+        applyTextSubstitutionsCheckbox.isEnabled = enabled
+        capitalizeFirstLetterCheckbox.isEnabled = enabled
     }
 
     private func updateSilenceDetectionControls() {
@@ -1681,6 +1872,37 @@ final class PreferencesWindowController: NSWindowController,
         Preferences.shared.continuousDictationAutoEndPeriod =
             (autoEndPeriodCheckbox.state == .on)
         updateContinuousDictationControls()
+    }
+
+    @objc private func transcriptProcessingChanged() {
+        Preferences.shared.transcriptProcessingEnabled =
+            (transcriptProcessingCheckbox.state == .on)
+        updateTranscriptProcessingControls()
+    }
+
+    @objc private func removeNonSpeechAnnotationsChanged() {
+        Preferences.shared.removeNonSpeechAnnotations =
+            (removeNonSpeechAnnotationsCheckbox.state == .on)
+    }
+
+    @objc private func normalizeCapitalizationChanged() {
+        Preferences.shared.normalizeCapitalization =
+            (normalizeCapitalizationCheckbox.state == .on)
+    }
+
+    @objc private func applyProperNounFixupsChanged() {
+        Preferences.shared.applyProperNounFixups =
+            (applyProperNounFixupsCheckbox.state == .on)
+    }
+
+    @objc private func applyTextSubstitutionsChanged() {
+        Preferences.shared.applyTextSubstitutions =
+            (applyTextSubstitutionsCheckbox.state == .on)
+    }
+
+    @objc private func capitalizeFirstLetterChanged() {
+        Preferences.shared.capitalizeFirstLetterAtLineStart =
+            (capitalizeFirstLetterCheckbox.state == .on)
     }
 
     @objc private func typedDelayStepperChanged() {

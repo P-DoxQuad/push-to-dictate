@@ -48,6 +48,12 @@ final class Preferences {
         static let continuousDictationSentencePauseSeconds = "continuousDictationSentencePauseSeconds"
         static let continuousDictationSentencePauseMaxSeconds = "continuousDictationSentencePauseMaxSeconds"
         static let continuousDictationTrailingPeriodSeconds = "continuousDictationTrailingPeriodSeconds"
+        static let transcriptProcessingEnabled = "transcriptProcessingEnabled"
+        static let removeNonSpeechAnnotations = "removeNonSpeechAnnotations"
+        static let normalizeCapitalization = "normalizeCapitalization"
+        static let applyProperNounFixups = "applyProperNounFixups"
+        static let applyTextSubstitutions = "applyTextSubstitutions"
+        static let capitalizeFirstLetterAtLineStart = "capitalizeFirstLetterAtLineStart"
     }
 
     static let noSoundName = "None"
@@ -285,6 +291,57 @@ final class Preferences {
             return stored == 0 ? 4.0 : stored
         }
         set { defaults.set(newValue, forKey: Key.continuousDictationTrailingPeriodSeconds) }
+    }
+
+    // Root toggle for the post-processing pipeline. When off, whisper's
+    // raw transcript is injected as-is. When on, each of the five nested
+    // preferences below individually governs whether its pass runs.
+    var transcriptProcessingEnabled: Bool {
+        get {
+            if defaults.object(forKey: Key.transcriptProcessingEnabled) == nil { return true }
+            return defaults.bool(forKey: Key.transcriptProcessingEnabled)
+        }
+        set { defaults.set(newValue, forKey: Key.transcriptProcessingEnabled) }
+    }
+
+    var removeNonSpeechAnnotations: Bool {
+        get {
+            if defaults.object(forKey: Key.removeNonSpeechAnnotations) == nil { return true }
+            return defaults.bool(forKey: Key.removeNonSpeechAnnotations)
+        }
+        set { defaults.set(newValue, forKey: Key.removeNonSpeechAnnotations) }
+    }
+
+    var normalizeCapitalization: Bool {
+        get {
+            if defaults.object(forKey: Key.normalizeCapitalization) == nil { return true }
+            return defaults.bool(forKey: Key.normalizeCapitalization)
+        }
+        set { defaults.set(newValue, forKey: Key.normalizeCapitalization) }
+    }
+
+    var applyProperNounFixups: Bool {
+        get {
+            if defaults.object(forKey: Key.applyProperNounFixups) == nil { return true }
+            return defaults.bool(forKey: Key.applyProperNounFixups)
+        }
+        set { defaults.set(newValue, forKey: Key.applyProperNounFixups) }
+    }
+
+    var applyTextSubstitutions: Bool {
+        get {
+            if defaults.object(forKey: Key.applyTextSubstitutions) == nil { return true }
+            return defaults.bool(forKey: Key.applyTextSubstitutions)
+        }
+        set { defaults.set(newValue, forKey: Key.applyTextSubstitutions) }
+    }
+
+    var capitalizeFirstLetterAtLineStart: Bool {
+        get {
+            if defaults.object(forKey: Key.capitalizeFirstLetterAtLineStart) == nil { return true }
+            return defaults.bool(forKey: Key.capitalizeFirstLetterAtLineStart)
+        }
+        set { defaults.set(newValue, forKey: Key.capitalizeFirstLetterAtLineStart) }
     }
 
     // Words / tokens that the post-processing casing normalizer would
@@ -582,7 +639,13 @@ final class Preferences {
         Key.continuousDictationAutoEndPeriod,
         Key.continuousDictationSentencePauseSeconds,
         Key.continuousDictationSentencePauseMaxSeconds,
-        Key.continuousDictationTrailingPeriodSeconds
+        Key.continuousDictationTrailingPeriodSeconds,
+        Key.transcriptProcessingEnabled,
+        Key.removeNonSpeechAnnotations,
+        Key.normalizeCapitalization,
+        Key.applyProperNounFixups,
+        Key.applyTextSubstitutions,
+        Key.capitalizeFirstLetterAtLineStart
     ]
 
     // MARK: - Keychain

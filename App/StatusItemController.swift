@@ -671,27 +671,36 @@ final class StatusItemController: NSObject,
     // at sentence starts.
     private static func postProcessTranscript(_ text: String,
                                               stripPunctuation: Bool = false) -> String {
+        let prefs = Preferences.shared
+        // Root gate: when off, whisper's raw transcript bypasses every
+        // post-processing pass and is returned verbatim. Each nested
+        // preference below individually governs its pass when the root
+        // is on.
+        if !prefs.transcriptProcessingEnabled { return text }
+
         var cleaned = text
-        let patterns = [
-            "\\[[^\\]]*\\]",
-            "\\([^\\)]*\\)",
-            // Asterisk-delimited sound annotations whisper emits on
-            // near-silent or non-speech chunks: *cough*, *laughs*,
-            // *sighs*, *music playing*, etc. Match a `*` followed by
-            // non-`*` content and a closing `*`.
-            "\\*[^*]*\\*",
-            // Leading angle-bracket artifacts whisper emits on silent or
-            // near-silent chunks (e.g. ">> I" when transcribing a long
-            // silence). Strip them along with any surrounding whitespace.
-            "^\\s*>+\\s*"
-        ]
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-                continue
+        if prefs.removeNonSpeechAnnotations {
+            let patterns = [
+                "\\[[^\\]]*\\]",
+                "\\([^\\)]*\\)",
+                // Asterisk-delimited sound annotations whisper emits on
+                // near-silent or non-speech chunks: *cough*, *laughs*,
+                // *sighs*, *music playing*, etc. Match a `*` followed by
+                // non-`*` content and a closing `*`.
+                "\\*[^*]*\\*",
+                // Leading angle-bracket artifacts whisper emits on silent or
+                // near-silent chunks (e.g. ">> I" when transcribing a long
+                // silence). Strip them along with any surrounding whitespace.
+                "^\\s*>+\\s*"
+            ]
+            for pattern in patterns {
+                guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+                    continue
+                }
+                let range = NSRange(cleaned.startIndex..., in: cleaned)
+                cleaned = regex.stringByReplacingMatches(
+                    in: cleaned, options: [], range: range, withTemplate: "")
             }
-            let range = NSRange(cleaned.startIndex..., in: cleaned)
-            cleaned = regex.stringByReplacingMatches(
-                in: cleaned, options: [], range: range, withTemplate: "")
         }
         if let ws = try? NSRegularExpression(pattern: "\\s+", options: []) {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
@@ -699,7 +708,8 @@ final class StatusItemController: NSObject,
                 in: cleaned, options: [], range: range, withTemplate: " ")
         }
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let ellipsis = try? NSRegularExpression(
+        if prefs.removeNonSpeechAnnotations,
+           let ellipsis = try? NSRegularExpression(
             pattern: "(?:\\.{3,}|…+)\\s*$", options: []) {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
             cleaned = ellipsis.stringByReplacingMatches(
@@ -730,8 +740,17 @@ final class StatusItemController: NSObject,
             CharacterSet.alphanumerics.contains($0)
         }
         if !hasContent { return "" }
-        let normalized = normalizeCasing(cleaned)
-        return applyTextSubstitutions(applyCapitalizationFixups(normalized))
+        var out = cleaned
+        if prefs.normalizeCapitalization {
+            out = normalizeCasing(out)
+        }
+        if prefs.applyProperNounFixups {
+            out = applyCapitalizationFixups(out)
+        }
+        if prefs.applyTextSubstitutions {
+            out = applyTextSubstitutions(out)
+        }
+        return out
     }
 
     // Applies pattern -> replacement substitutions where the matched
@@ -1104,9 +1123,11 @@ final class StatusItemController: NSObject,
                         // sentence; keep it lowercase. On AX query failure
                         // (nil), default to capitalizing: dictation usually
                         // starts a new thought.
-                        let atLineStart = CursorContext.isCursorAtLineStart()
-                        if atLineStart != false {
-                            cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                        if Preferences.shared.capitalizeFirstLetterAtLineStart {
+                            let atLineStart = CursorContext.isCursorAtLineStart()
+                            if atLineStart != false {
+                                cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                            }
                         }
                         if !cleaned.isEmpty {
                             self?.textInjector.insert(cleaned)
