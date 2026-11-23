@@ -1217,3 +1217,51 @@ Visual feedback (red text while typing an out-of-range value) is preserved. Writ
 Whisper emits a second annotation style on near-silent or non-speech chunks that the bracket / paren strip patterns don't catch: asterisk-delimited markers like `*cough*`, `*laughs*`, `*sighs*`, `*music playing*`. These were slipping through into injected output.
 
 Added a third regex to the `postProcessTranscript` strip patterns: `\\*[^*]*\\*`. Matches a `*`, any run of non-`*` characters, and a closing `*`. After the strip the leftover is empty, so the existing `hasContent` check (requires at least one alphanumeric) drops the chunk before injection. No new preference; the strip is unconditional alongside the existing bracket and paren patterns.
+
+#### Capitalization rewrite: regex replaces state machine
+
+Replaced the `normalizeCasing` character-by-character scanner with a single regex pass. Rule: lowercase any `[A-Z]` not preceded by `[.!?]\s`. Whisper-emitted sentence-start capitals (`. H`, `? H`, `! H`) are preserved; mid-sentence capitals that whisper introduced are folded to lowercase (`applyCapitalizationFixups` then re-raises known proper nouns).
+
+Removes the `capitalizeAtSentenceStarts` parameter and the bug where an already-uppercase first letter from whisper's output was always lowercased by the fallback branch. One behavior now serves both strip and non-strip modes. In strip mode the caller strips sentence-ending periods before `normalizeCasing` runs, so the regex has no `. ` anchors left and collapses to "lowercase everything"; chunk-join logic still re-capitalizes at boundaries as before.
+
+Standalone pronoun `i` and its contractions (`i'll`, `i've`, `i'm`, `i'd`) are re-uppercased by the same post-pass as before.
+
+#### Standard-mode trailing period parity
+
+Auto trailing period and its seconds field now govern standard (non-continuous) dictation, not just continuous. Previously the checkbox was continuous-only and whisper's trailing period landed instantly in standard mode regardless of the setting.
+
+New behavior in `transcribe(samples:)` after `postProcessTranscript` returns:
+
+- Trailing `.` characters are stripped unconditionally so the final character is controlled by the checkbox, not by whisper. Intra-sentence periods and trailing `?` / `!` are preserved.
+- `CursorContext.isCursorAtLineStart()` is queried. On `true` or `nil` (AX query failed), the first alphabetic character is uppercased. On explicit `false`, it stays lowercase so inline mid-sentence dictation doesn't produce a stray capital.
+- If the checkbox is on and the final character isn't `?` / `!`, `scheduleStandardTrailingPeriodIfNeeded(for:)` schedules a wall-clock `DispatchWorkItem` for the configured seconds. Fires at the cursor with `.`. Timer uses the shared `trailingPeriodWorkItem` field so the existing cancel site in `setRecording(true)` (line 429) covers both modes: pressing the hotkey during the window cancels the pending period, same as continuous.
+
+Preferences this reuses: `continuousDictationAutoEndPeriod` and `continuousDictationTrailingPeriodSeconds`. Storage keys unchanged despite the broader scope; renaming them would strand existing users' values.
+
+#### Preferences UI reorganization
+
+**Scope move: continuous-dictation controls into one tab.** `Sentence pause` and `Window close` (renamed `Window threshold`) moved from Output → Transcription Behavior. The whole continuous-dictation feature now lives in one place; Output tab keeps only cross-mode settings.
+
+**Renames.**
+
+- `Silence threshold` → `Silence level` (it's an audio level, not a time threshold; avoids overloading "threshold" against `Window threshold`).
+- `Window close` → `Window threshold`.
+- `Auto-end sentence with period` → `Auto trailing period`.
+- `Auto-stop after silence` → `Auto stop (toggle mode only)` (caption inlined).
+- `Continuous dictation` → `Continuous dictation (experimental)` (caption inlined; "Toggle mode only" dropped since continuous dictation only existing in toggle mode is covered by the help popover).
+
+**Silence Detection reorder.** `Silence level` moved above `Auto stop` since it's the shared RMS definition used by both the auto-stop feature (toggle) and the chunk-boundary detector (continuous); the duration below is auto-stop-specific.
+
+**Enable gating.**
+
+- `updateContinuousDictationControls()` grays out all continuous-only fields when the master checkbox is off: Pause, Max chunk, Sentence pause, Window threshold, Strip whisper punctuation, Feed prior transcript, Max chars. Prompt-chain max chars has a nested gate on the prompt-chain checkbox. Auto trailing period stays always-enabled (applies to both modes); its seconds field gates on the checkbox instead.
+- `updateSilenceDetectionControls()` grays `Silence duration` when `Auto stop` is off. `Silence level` stays always-enabled because continuous dictation reads it even when auto-stop is off.
+- Both update methods are called from `updateConditionalRows` (via `syncFromPreferences`) and from their respective checkbox actions.
+
+**Steppers added.** Every numeric preference now has a stepper: Silence level, Silence duration, Pause, Max chunk, Max chars. Previously only threads, beam, typed delay, and the sentence-timing fields had them. Silence level accepts 4 decimal places (down from 3) with increments of 0.001 and a floor of 0.0001; display format changed to `%.4f` throughout.
+
+**Hint text shortened.** Inline hints now carry only unit + default + range. Explanatory clauses ("lower = more sensitive", "higher = more tolerant of pauses", "pause before text appears") moved into help popovers.
+
+**Help popovers.** New `HelpButton` and `HelpPopoverViewController` classes at file scope. Round `?` button next to non-obvious settings reveals an NSPopover with plain-text ELI5 explanations. Deployed on: Silence level, Silence duration, Pause, Max chunk, Sentence pause, Window threshold, Strip whisper punctuation, Feed prior transcript, Max chars, Method (paste/typed), Typed delay, Auto trailing period, Trailing period, Transcription threads, Accuracy. Obvious settings (Hotkey, Launch at login, Input device, sound popups, backend selector, Local model, API key, Backup/Restore, Save debug recordings, Log everything, Auto stop checkbox, Continuous dictation checkbox) have no help button. The Output tab's "Notes" caption was removed since its text about typed insertion now lives in the Method help popover.
+
+`HelpPopoverViewController` configures its `NSTextField` manually (word wrap, max layout width, non-editable) because the 10.12+ `wrappingLabelWithString` convenience initializer isn't available at the 10.11 deployment target.

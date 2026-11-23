@@ -636,6 +636,29 @@ final class StatusItemController: NSObject,
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
     }
 
+    // Standard-mode counterpart to scheduleTrailingPeriod. Fires once after
+    // the configured number of seconds unless the user starts a new recording
+    // first (setRecording(true) cancels trailingPeriodWorkItem). Skipped when
+    // the injected text already ends with sentence-terminating punctuation, so
+    // dictations that naturally resolve (`"Where are you?"`, `"Watch out!"`)
+    // aren't followed by a stray period.
+    private func scheduleStandardTrailingPeriodIfNeeded(for injected: String) {
+        guard Preferences.shared.continuousDictationAutoEndPeriod else { return }
+        let seconds = Preferences.shared.continuousDictationTrailingPeriodSeconds
+        if seconds <= 0 { return }
+        if let last = injected.last, last == "." || last == "?" || last == "!" {
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.textInjector.insert(".")
+            self.trailingPeriodWorkItem = nil
+            Logger.info("standard: trailing period injected (silence > \(seconds)s)")
+        }
+        trailingPeriodWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
     // Removes whisper's non-speech annotation tokens that leak into the
     // transcript on silent / near-silent chunks: things like [BLANK_AUDIO],
     // [MUSIC], (soft music), (laughter). In single-shot dictation these are
@@ -707,8 +730,7 @@ final class StatusItemController: NSObject,
             CharacterSet.alphanumerics.contains($0)
         }
         if !hasContent { return "" }
-        let normalized = normalizeCasing(cleaned,
-                                         capitalizeAtSentenceStarts: !stripPunctuation)
+        let normalized = normalizeCasing(cleaned)
         return applyTextSubstitutions(applyCapitalizationFixups(normalized))
     }
 
@@ -767,39 +789,27 @@ final class StatusItemController: NSObject,
     // capitalized even when it is a mid-sentence continuation of the
     // previous chunk; acceptable because pauses long enough to trigger
     // a chunk boundary usually fall on sentence breaks anyway.
-    private static func normalizeCasing(_ text: String,
-                                        capitalizeAtSentenceStarts: Bool = true) -> String {
-        var result = String()
-        result.reserveCapacity(text.count)
-        // When capitalizeAtSentenceStarts is false (strip-punctuation mode)
-        // the initial state is "don't capitalize"; period-driven
-        // capitalization is also suppressed. Even in strip mode, however,
-        // the alpha character immediately following a `?` or `!` preserves
-        // whisper's original case, so a legitimate next-sentence capital
-        // that whisper emitted inside a chunk is not destroyed.
-        var needsCapital = capitalizeAtSentenceStarts
-        var preserveNextOriginalCase = false
-        for ch in text {
-            if ch == "." || ch == "!" || ch == "?" {
-                result.append(ch)
-                needsCapital = capitalizeAtSentenceStarts
-                preserveNextOriginalCase = (ch == "!" || ch == "?")
-            } else if ch == " " || ch == "\t" || ch == "\n" {
-                result.append(ch)
-            } else {
-                let isUpperAlpha = ch >= "A" && ch <= "Z"
-                let isLowerAlpha = ch >= "a" && ch <= "z"
-                if needsCapital && isLowerAlpha {
-                    result.append(String(ch).uppercased())
-                } else if preserveNextOriginalCase {
-                    result.append(ch)
-                } else if isUpperAlpha {
-                    result.append(String(ch).lowercased())
-                } else {
-                    result.append(ch)
-                }
-                needsCapital = false
-                preserveNextOriginalCase = false
+    // Lowercase any uppercase letter that is not preceded by sentence-ending
+    // punctuation + whitespace (`. `, `! `, `? `). Whisper-emitted capitals at
+    // genuine sentence starts are preserved; mid-sentence capitals that whisper
+    // introduced (shouty-case artifacts, hallucinated proper nouns) are folded
+    // to lowercase. In strip mode the caller has already removed sentence
+    // periods before this runs, so there are no `. ` anchors left and the
+    // regex collapses to "lowercase everything"; chunk-join logic then adds
+    // capitals back at chunk boundaries as needed. First-letter-of-transcript
+    // capitalization in toggle mode is applied after this, outside
+    // postProcessTranscript, driven by CursorContext.isCursorAtLineStart.
+    private static func normalizeCasing(_ text: String) -> String {
+        var result = text
+        if let regex = try? NSRegularExpression(
+            pattern: "(?<![.!?]\\s)[A-Z]", options: []) {
+            let range = NSRange(result.startIndex..., in: result)
+            let matches = regex.matches(in: result, options: [], range: range)
+            // Iterate in reverse so earlier range replacements don't shift
+            // the indices of later matches.
+            for match in matches.reversed() {
+                guard let r = Range(match.range, in: result) else { continue }
+                result.replaceSubrange(r, with: result[r].lowercased())
             }
         }
         // Re-uppercase the standalone pronoun "i" and its contractions
@@ -1070,9 +1080,38 @@ final class StatusItemController: NSObject,
                 case .success(let text):
                     Logger.info(String(format: "transcript (%.2fs): %@", elapsed, text))
                     self?.setIconState(.idle)
-                    let cleaned = StatusItemController.postProcessTranscript(text)
+                    var cleaned = StatusItemController.postProcessTranscript(text)
                     if !cleaned.isEmpty {
-                        self?.textInjector.insert(cleaned)
+                        // Strip any trailing period whisper itself added. The
+                        // Auto trailing period checkbox + its seconds field
+                        // together are what govern whether a period appears
+                        // and how long after injection it arrives. Preserving
+                        // whisper's period would short-circuit the timer and
+                        // let the period appear instantly in "Auto trailing
+                        // period on" sessions, defeating the configured delay.
+                        // Intra-sentence periods stay (so "I went to store.
+                        // Then home" reads correctly) and trailing ? or ! stay
+                        // (intonation-driven; losing them would change meaning
+                        // and they're not what the timer is meant to add).
+                        while cleaned.last == "." {
+                            cleaned.removeLast()
+                        }
+                        cleaned = cleaned.trimmingCharacters(in: .whitespaces)
+                        // Capitalize the first letter when the cursor is at a
+                        // line start (fresh field, or immediately after a
+                        // newline the user typed). When the cursor is mid-line
+                        // the dictated text is being inserted into an existing
+                        // sentence; keep it lowercase. On AX query failure
+                        // (nil), default to capitalizing: dictation usually
+                        // starts a new thought.
+                        let atLineStart = CursorContext.isCursorAtLineStart()
+                        if atLineStart != false {
+                            cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                        }
+                        if !cleaned.isEmpty {
+                            self?.textInjector.insert(cleaned)
+                            self?.scheduleStandardTrailingPeriodIfNeeded(for: cleaned)
+                        }
                     }
                 case .failure(let error):
                     let backend = Preferences.shared.backend

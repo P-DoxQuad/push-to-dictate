@@ -133,19 +133,23 @@ final class PreferencesWindowController: NSWindowController,
     private let silenceAutoStopCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
-        b.title = "Auto-stop after silence"
+        b.title = "Auto stop (toggle mode only)"
         return b
     }()
     private let silenceThresholdField = NSTextField()
+    private let silenceThresholdStepper = NSStepper()
     private let silenceSecondsField = NSTextField()
+    private let silenceSecondsStepper = NSStepper()
     private let continuousDictationCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
-        b.title = "Continuous dictation"
+        b.title = "Continuous dictation (experimental)"
         return b
     }()
     private let continuousPauseField = NSTextField()
+    private let continuousPauseStepper = NSStepper()
     private let continuousMaxChunkField = NSTextField()
+    private let continuousMaxChunkStepper = NSStepper()
     private let continuousPromptChainCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
@@ -153,6 +157,7 @@ final class PreferencesWindowController: NSWindowController,
         return b
     }()
     private let continuousPromptChainMaxCharsField = NSTextField()
+    private let continuousPromptChainMaxCharsStepper = NSStepper()
     private let stripWhisperPunctuationCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
@@ -162,7 +167,7 @@ final class PreferencesWindowController: NSWindowController,
     private let autoEndPeriodCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
-        b.title = "Automatic trailing period to close final sentence"
+        b.title = "Auto trailing period"
         return b
     }()
     private let continuousSentencePauseField = NSTextField()
@@ -371,6 +376,42 @@ final class PreferencesWindowController: NSWindowController,
         typedDelayStepper.target = self
         typedDelayStepper.action = #selector(typedDelayStepperChanged)
         typedDelayField.delegate = self
+
+        silenceThresholdStepper.minValue = 0.0001
+        silenceThresholdStepper.maxValue = 0.5
+        silenceThresholdStepper.increment = 0.001
+        silenceThresholdStepper.valueWraps = false
+        silenceThresholdStepper.target = self
+        silenceThresholdStepper.action = #selector(silenceThresholdStepperChanged)
+
+        silenceSecondsStepper.minValue = 1.2
+        silenceSecondsStepper.maxValue = 10.0
+        silenceSecondsStepper.increment = 0.1
+        silenceSecondsStepper.valueWraps = false
+        silenceSecondsStepper.target = self
+        silenceSecondsStepper.action = #selector(silenceSecondsStepperChanged)
+
+        continuousPauseStepper.minValue = 0.3
+        continuousPauseStepper.maxValue = 2.0
+        continuousPauseStepper.increment = 0.1
+        continuousPauseStepper.valueWraps = false
+        continuousPauseStepper.target = self
+        continuousPauseStepper.action = #selector(continuousPauseStepperChanged)
+
+        continuousMaxChunkStepper.minValue = 5.0
+        continuousMaxChunkStepper.maxValue = 30.0
+        continuousMaxChunkStepper.increment = 0.5
+        continuousMaxChunkStepper.valueWraps = false
+        continuousMaxChunkStepper.target = self
+        continuousMaxChunkStepper.action = #selector(continuousMaxChunkStepperChanged)
+
+        continuousPromptChainMaxCharsStepper.minValue = 100
+        continuousPromptChainMaxCharsStepper.maxValue = 900
+        continuousPromptChainMaxCharsStepper.increment = 10
+        continuousPromptChainMaxCharsStepper.valueWraps = false
+        continuousPromptChainMaxCharsStepper.target = self
+        continuousPromptChainMaxCharsStepper.action =
+            #selector(continuousPromptChainMaxCharsStepperChanged)
     }
 
     // MARK: - Layout (split view: sidebar + content)
@@ -709,7 +750,7 @@ final class PreferencesWindowController: NSWindowController,
 
         let lw = PreferencesWindowController.widestLabelWidth(
             ["Input device:", "Start sound:", "Stop sound:",
-             "Silence threshold:", "Silence duration:"])
+             "Silence level:", "Silence duration:"])
 
         let inputRow = buildRowView(labelText: "Input device:",
                                     control: inputDevicePopup, labelWidth: lw)
@@ -718,28 +759,48 @@ final class PreferencesWindowController: NSWindowController,
         let stopRow = buildRowView(labelText: "Stop sound:",
                                    control: stopSoundPopup, labelWidth: lw)
 
-        let autoStopStack = NSStackView(views: [
-            silenceAutoStopCheckbox,
-            PreferencesWindowController.makeCaption("Toggle mode only")
-        ])
-        autoStopStack.orientation = .vertical
-        autoStopStack.alignment = .leading
-        autoStopStack.spacing = 2
 
         silenceThresholdField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let thresholdHint = PreferencesWindowController.makeHint(
-            "RMS level · default 0.01 · lower = more sensitive")
-        let thresholdControl = NSStackView(views: [silenceThresholdField, thresholdHint])
+            "RMS · default 0.0100")
+        let thresholdHelp = HelpButton(text:
+            "How quiet the microphone needs to be before the app counts " +
+            "it as silence.\n\n" +
+            "The number is an audio loudness measure (RMS). Lower = the " +
+            "app treats quieter sounds as still being speech. Higher = " +
+            "only loud audio counts as speech, and anything softer is " +
+            "silence.\n\n" +
+            "Used by both auto-stop (standard mode) and chunk detection " +
+            "(continuous mode) because \"what counts as silent\" is one " +
+            "idea.\n\n" +
+            "Example: if auto-stop fires while you're still talking, " +
+            "your speech is dipping below this value - lower it (e.g. " +
+            "0.0050). If auto-stop never fires when you stop talking, " +
+            "background noise is above it - raise it (e.g. 0.0200).")
+        let thresholdControl = NSStackView(views: [
+            silenceThresholdField, silenceThresholdStepper, thresholdHint, thresholdHelp
+        ])
         thresholdControl.orientation = .horizontal
         thresholdControl.spacing = 8
         let (thresholdRow, thresholdLabel) = buildLabeledRow(
-            labelText: "Silence threshold:", control: thresholdControl, labelWidth: lw)
+            labelText: "Silence level:", control: thresholdControl, labelWidth: lw)
         silenceThresholdLabel = thresholdLabel
 
         silenceSecondsField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let secondsHint = PreferencesWindowController.makeHint(
-            "seconds · default 4.0 · higher = more tolerant of pauses")
-        let secondsControl = NSStackView(views: [silenceSecondsField, secondsHint])
+            "seconds · default 4.0")
+        let secondsHelp = HelpButton(text:
+            "How long silence must last before Auto stop ends the " +
+            "recording.\n\n" +
+            "Only used when Auto stop is on. The timer starts the moment " +
+            "the microphone drops below the Silence level above, and " +
+            "resets any time it goes back above.\n\n" +
+            "Example: with 4.0 seconds, if you stop talking for 4 full " +
+            "seconds, the app finalizes your dictation. A 3-second " +
+            "thinking pause mid-sentence won't stop it.")
+        let secondsControl = NSStackView(views: [
+            silenceSecondsField, silenceSecondsStepper, secondsHint, secondsHelp
+        ])
         secondsControl.orientation = .horizontal
         secondsControl.spacing = 8
         let (secondsRow, secondsLabelRef) = buildLabeledRow(
@@ -749,7 +810,7 @@ final class PreferencesWindowController: NSWindowController,
         let input = buildSection(title: "Input", rows: [inputRow])
         let feedback = buildSection(title: "Feedback", rows: [startRow, stopRow])
         let silence = buildSection(title: "Silence Detection",
-                                   rows: [autoStopStack, thresholdRow, secondsRow])
+                                   rows: [thresholdRow, silenceAutoStopCheckbox, secondsRow])
 
         let inset = PreferencesWindowController.paneInset
         let gap = PreferencesWindowController.sectionGap
@@ -766,7 +827,8 @@ final class PreferencesWindowController: NSWindowController,
 
         let lw = PreferencesWindowController.widestLabelWidth(
             ["Backend:", "Local model:", "OpenAI API key:", "Location:",
-             "Pause:", "Max chunk:", "Max chars:"])
+             "Pause:", "Max chunk:", "Sentence pause:", "Window threshold:",
+             "Max chars:"])
 
         let backendRow = buildRowView(labelText: "Backend:",
                                       control: backendPopup, labelWidth: lw)
@@ -791,18 +853,44 @@ final class PreferencesWindowController: NSWindowController,
         let modelsFolderRow = buildRowView(labelText: "Location:",
                                            control: modelsFolderControl, labelWidth: lw)
 
+        let continuousHelp = HelpButton(text:
+            "A mode that transcribes while you talk, streaming text " +
+            "into your document in chunks instead of waiting for you " +
+            "to finish.\n\n" +
+            "Each natural pause produces another chunk of text. Longer " +
+            "pauses are treated as sentence breaks (period + capital), " +
+            "shorter pauses as continuations.\n\n" +
+            "Only works in toggle mode: press the hotkey once to start " +
+            "the session, press again to end it. Not usable in " +
+            "push-to-talk mode since the session ends the moment you " +
+            "release the key.\n\n" +
+            "Still being refined. The settings below control how it " +
+            "decides where one phrase ends and the next begins. Expect " +
+            "occasional misfires on noisy audio or unusually long " +
+            "run-on sentences.")
         let continuousStack = NSStackView(views: [
             continuousDictationCheckbox,
-            PreferencesWindowController.makeCaption("Toggle mode only · experimental")
+            continuousHelp
         ])
-        continuousStack.orientation = .vertical
-        continuousStack.alignment = .leading
-        continuousStack.spacing = 2
+        continuousStack.orientation = .horizontal
+        continuousStack.alignment = .centerY
+        continuousStack.spacing = 8
 
         continuousPauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let pauseHint = PreferencesWindowController.makeHint(
-            "seconds · default 0.5 · pause before text appears")
-        let pauseControl = NSStackView(views: [continuousPauseField, pauseHint])
+            "seconds · default 0.5")
+        let pauseHelp = HelpButton(text:
+            "How long you need to pause before the app decides a chunk " +
+            "of speech is done and sends it off to be transcribed.\n\n" +
+            "Shorter = text appears faster but risks chopping sentences " +
+            "in half at natural mid-sentence pauses. Longer = text takes " +
+            "longer to show up but phrases stay intact.\n\n" +
+            "Example: with 0.5 seconds, a quick breath between words " +
+            "stays part of the same chunk, but a clear pause between " +
+            "two phrases produces a new chunk.")
+        let pauseControl = NSStackView(views: [
+            continuousPauseField, continuousPauseStepper, pauseHint, pauseHelp
+        ])
         pauseControl.orientation = .horizontal
         pauseControl.spacing = 8
         let (pauseRow, pauseLabelRef) = buildLabeledRow(
@@ -811,19 +899,87 @@ final class PreferencesWindowController: NSWindowController,
 
         continuousMaxChunkField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let maxChunkHint = PreferencesWindowController.makeHint(
-            "seconds · default 30.0 · min 5.0 · maximum speech before break")
-        let maxChunkControl = NSStackView(views: [continuousMaxChunkField, maxChunkHint])
+            "seconds · default 30.0 · 5-30")
+        let maxChunkHelp = HelpButton(text:
+            "Safety limit on chunk length. If you talk non-stop for " +
+            "this long without pausing, the app forces a break anyway " +
+            "and sends what it has to be transcribed.\n\n" +
+            "Prevents the transcription engine from choking on a huge " +
+            "audio clip, and keeps text appearing at a reasonable rate.\n\n" +
+            "Example: with 30 seconds, a long run-on sentence gets cut " +
+            "after half a minute so you don't wait forever to see it.")
+        let maxChunkControl = NSStackView(views: [
+            continuousMaxChunkField, continuousMaxChunkStepper, maxChunkHint, maxChunkHelp
+        ])
         maxChunkControl.orientation = .horizontal
         maxChunkControl.spacing = 8
         let (maxChunkRow, maxChunkLabelRef) = buildLabeledRow(
             labelText: "Max chunk:", control: maxChunkControl, labelWidth: lw)
         continuousMaxChunkLabel = maxChunkLabelRef
 
+        continuousSentencePauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let sentencePauseHelp = HelpButton(text:
+            "How long a pause between two chunks must be before the app " +
+            "treats it as the end of a sentence.\n\n" +
+            "Shorter pauses are treated as continuations of the same " +
+            "sentence (no period, no capital letter). Pauses this long " +
+            "or longer get a period and a capital on the next chunk.\n\n" +
+            "Example: with 1.0 second, a quick half-second pause between " +
+            "phrases stays one sentence; pausing a full second signals " +
+            "\"start a new thought.\"")
+        let sentencePauseControl = NSStackView(views: [
+            continuousSentencePauseField,
+            continuousSentencePauseStepper,
+            PreferencesWindowController.makeHint("seconds · default 1.0"),
+            sentencePauseHelp
+        ])
+        sentencePauseControl.orientation = .horizontal
+        sentencePauseControl.spacing = 8
+        let (sentencePauseRow, sentencePauseLabelRef) = buildLabeledRow(
+            labelText: "Sentence pause:", control: sentencePauseControl, labelWidth: lw)
+        continuousSentencePauseLabel = sentencePauseLabelRef
+
+        continuousSentencePauseMaxField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let windowThresholdHelp = HelpButton(text:
+            "The upper limit on the sentence-break window. Pauses longer " +
+            "than this are treated as \"user got distracted\" rather than " +
+            "a sentence break.\n\n" +
+            "Between the Sentence pause value and this one, the next " +
+            "chunk is joined with a period. Beyond this, the next chunk " +
+            "is treated as a fresh restart with no join, no period.\n\n" +
+            "Example: with Sentence pause 1.0 and Window threshold 2.0, " +
+            "pausing 1 to 2 seconds means \"new sentence,\" but pausing " +
+            "more than 2 seconds means \"something else happened, just " +
+            "continue cleanly.\"")
+        let sentencePauseMaxControl = NSStackView(views: [
+            continuousSentencePauseMaxField,
+            continuousSentencePauseMaxStepper,
+            PreferencesWindowController.makeHint("seconds · default 2.0"),
+            windowThresholdHelp
+        ])
+        sentencePauseMaxControl.orientation = .horizontal
+        sentencePauseMaxControl.spacing = 8
+        let (sentencePauseMaxRow, sentencePauseMaxLabelRef) = buildLabeledRow(
+            labelText: "Window threshold:", control: sentencePauseMaxControl, labelWidth: lw)
+        continuousSentencePauseMaxLabel = sentencePauseMaxLabelRef
+
         continuousPromptChainMaxCharsField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let promptCharsHint = PreferencesWindowController.makeHint(
-            "default 200 · min 100 · max 900 · higher = more context")
+            "default 200 · 100-900")
+        let maxCharsHelp = HelpButton(text:
+            "How much of your previous transcription to pass to the " +
+            "speech engine as context for the next chunk.\n\n" +
+            "More context helps the engine pick between similar-sounding " +
+            "words. If you just said \"I went to the beach,\" the next " +
+            "chunk is more likely to come out as \"sand\" than \"send.\" " +
+            "But more context takes longer to process.\n\n" +
+            "Example: 200 characters is roughly 30 to 40 words, enough " +
+            "to catch the current topic. Raise if words keep being " +
+            "mis-heard despite obvious context; lower if transcription " +
+            "feels sluggish.")
         let promptCharsControl = NSStackView(views: [
-            continuousPromptChainMaxCharsField, promptCharsHint
+            continuousPromptChainMaxCharsField, continuousPromptChainMaxCharsStepper,
+            promptCharsHint, maxCharsHelp
         ])
         promptCharsControl.orientation = .horizontal
         promptCharsControl.spacing = 8
@@ -836,10 +992,46 @@ final class PreferencesWindowController: NSWindowController,
         let modelsFolder = buildSection(title: "Models Folder",
                                         rows: [modelsFolderRow])
         transcriptionModelsFolderSection = modelsFolder
+        let stripHelp = HelpButton(text:
+            "When on, the app removes any periods the speech engine " +
+            "wrote and instead decides where sentences end based purely " +
+            "on how long you pause between phrases (using Sentence " +
+            "pause and Window threshold above).\n\n" +
+            "Why: the speech engine sometimes inserts periods in " +
+            "awkward places (lists, mid-phrase pauses, inferred stops). " +
+            "Turning this on gives you cleaner, more predictable " +
+            "results in continuous dictation.\n\n" +
+            "Example: \"I bought milk, eggs, cheese.\" (pause) \"Then " +
+            "went home.\" With this off, the engine's own periods and " +
+            "capitals land wherever it inferred them. With this on, " +
+            "you get \"I bought milk, eggs, cheese. Then went home\" " +
+            "because only your long pause counted as a sentence break.")
+        let stripRow = NSStackView(views: [stripWhisperPunctuationCheckbox, stripHelp])
+        stripRow.orientation = .horizontal
+        stripRow.spacing = 8
+        stripRow.alignment = .centerY
+
+        let promptChainHelp = HelpButton(text:
+            "When on, the app shows the speech engine what it just " +
+            "transcribed before it works on the next chunk. Gives the " +
+            "engine context so it picks better word spellings.\n\n" +
+            "Example: if you just said \"I went to the beach,\" the " +
+            "engine is more likely to transcribe \"sand\" rather than " +
+            "\"send\" or \"sent\" in the next chunk, because the beach " +
+            "context primed it.\n\n" +
+            "Trade-off: each transcription takes a tiny bit longer and " +
+            "uses a little more memory. For most users the quality " +
+            "improvement is worth it.")
+        let promptChainRow = NSStackView(views: [continuousPromptChainCheckbox, promptChainHelp])
+        promptChainRow.orientation = .horizontal
+        promptChainRow.spacing = 8
+        promptChainRow.alignment = .centerY
+
         let behavior = buildSection(title: "Behavior",
                                     rows: [continuousStack, pauseRow, maxChunkRow,
-                                           continuousPromptChainCheckbox, promptCharsRow,
-                                           stripWhisperPunctuationCheckbox])
+                                           sentencePauseRow, sentencePauseMaxRow,
+                                           stripRow,
+                                           promptChainRow, promptCharsRow])
 
         let inset = PreferencesWindowController.paneInset
         let gap = PreferencesWindowController.sectionGap
@@ -902,10 +1094,20 @@ final class PreferencesWindowController: NSWindowController,
         pane.translatesAutoresizingMaskIntoConstraints = false
 
         let lw = PreferencesWindowController.widestLabelWidth(
-            ["Method:", "Typed delay:",
-             "Sentence pause:", "Window close:", "Trailing period:"])
+            ["Method:", "Typed delay:", "Trailing period:"])
 
-        let radios = NSStackView(views: [injectionPasteRadio, injectionTypedRadio])
+        let methodHelp = HelpButton(text:
+            "How the app actually puts dictated text into the field " +
+            "you're typing in.\n\n" +
+            "Paste: copies the text to your clipboard and pastes it. " +
+            "Fast and reliable in most apps, but it overwrites whatever " +
+            "you had on the clipboard, and a few apps block paste.\n\n" +
+            "Typed: simulates keyboard keystrokes, one character at a " +
+            "time. Slower, but works in apps where paste is unreliable " +
+            "(some terminals, games, sandboxed apps).\n\n" +
+            "Start with Paste. Switch to Typed only if a specific app " +
+            "drops or ignores the pasted text.")
+        let radios = NSStackView(views: [injectionPasteRadio, injectionTypedRadio, methodHelp])
         radios.orientation = .horizontal
         radios.spacing = 16
         let methodRow = buildRowView(labelText: "Method:",
@@ -913,43 +1115,57 @@ final class PreferencesWindowController: NSWindowController,
 
         typedDelayField.widthAnchor.constraint(equalToConstant: 60).isActive = true
         let delayHint = PreferencesWindowController.makeHint(
-            "ms per character · default 8 · max 100 = slower keystrokes")
-        let delayControl = NSStackView(views: [typedDelayField, typedDelayStepper, delayHint])
+            "ms · default 8 · 5-100")
+        let delayHelp = HelpButton(text:
+            "Only used when Method is set to Typed. Controls how long " +
+            "the app waits between each simulated keystroke.\n\n" +
+            "Some apps can't keep up with keystrokes fired too fast and " +
+            "will drop characters, producing garbled text. A small " +
+            "delay gives them time to process each one.\n\n" +
+            "Example: if typed output comes out with missing letters, " +
+            "raise this (e.g. 15 or 20 ms). If text is clean, you can " +
+            "lower it to make typing faster.")
+        let delayControl = NSStackView(views: [
+            typedDelayField, typedDelayStepper, delayHint, delayHelp
+        ])
         delayControl.orientation = .horizontal
         delayControl.spacing = 8
         let (delayRow, delayLabelRef) = buildLabeledRow(
             labelText: "Typed delay:", control: delayControl, labelWidth: lw)
         typedDelayLabel = delayLabelRef
 
-        continuousSentencePauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let sentencePauseControl = NSStackView(views: [
-            continuousSentencePauseField,
-            continuousSentencePauseStepper,
-            PreferencesWindowController.makeHint("seconds · default 1.0")
-        ])
-        sentencePauseControl.orientation = .horizontal
-        sentencePauseControl.spacing = 8
-        let (sentencePauseRow, sentencePauseLabelRef) = buildLabeledRow(
-            labelText: "Sentence pause:", control: sentencePauseControl, labelWidth: lw)
-        continuousSentencePauseLabel = sentencePauseLabelRef
-
-        continuousSentencePauseMaxField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let sentencePauseMaxControl = NSStackView(views: [
-            continuousSentencePauseMaxField,
-            continuousSentencePauseMaxStepper,
-            PreferencesWindowController.makeHint("seconds · default 2.0")
-        ])
-        sentencePauseMaxControl.orientation = .horizontal
-        sentencePauseMaxControl.spacing = 8
-        let (sentencePauseMaxRow, sentencePauseMaxLabelRef) = buildLabeledRow(
-            labelText: "Window close:", control: sentencePauseMaxControl, labelWidth: lw)
-        continuousSentencePauseMaxLabel = sentencePauseMaxLabelRef
+        let autoEndHelp = HelpButton(text:
+            "When on, the app ensures every dictation ends with a " +
+            "period. When off, no trailing period is added, even if " +
+            "the speech engine wrote one.\n\n" +
+            "The period doesn't appear instantly. There's a short " +
+            "wait (set by Trailing period below) so you can start " +
+            "another dictation if you weren't actually done. If you " +
+            "press the hotkey during that wait, the period is " +
+            "cancelled and you continue the same sentence.\n\n" +
+            "Exception: sentences that already end with \"?\" or \"!\" " +
+            "stay as-is. The app won't tack a period onto them.")
+        let autoEndRow = NSStackView(views: [autoEndPeriodCheckbox, autoEndHelp])
+        autoEndRow.orientation = .horizontal
+        autoEndRow.spacing = 8
+        autoEndRow.alignment = .centerY
 
         continuousTrailingPeriodField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let trailingPeriodHelp = HelpButton(text:
+            "How long the app waits after your dictation finishes " +
+            "before actually dropping in the trailing period.\n\n" +
+            "This is your grace period. If you press the hotkey within " +
+            "this window to start another dictation, the pending " +
+            "period is cancelled so you can continue the same thought.\n\n" +
+            "Example: with 4.0 seconds, your dictation appears, then 4 " +
+            "seconds later a period is added. If you start dictating " +
+            "again within those 4 seconds, no period appears and the " +
+            "new text joins on cleanly.")
         let trailingPeriodControl = NSStackView(views: [
             continuousTrailingPeriodField,
             continuousTrailingPeriodStepper,
-            PreferencesWindowController.makeHint("seconds · default 4.0")
+            PreferencesWindowController.makeHint("seconds · default 4.0"),
+            trailingPeriodHelp
         ])
         trailingPeriodControl.orientation = .horizontal
         trailingPeriodControl.spacing = 8
@@ -957,24 +1173,17 @@ final class PreferencesWindowController: NSWindowController,
             labelText: "Trailing period:", control: trailingPeriodControl, labelWidth: lw)
         continuousTrailingPeriodLabel = trailingPeriodLabelRef
 
-        let notesText = PreferencesWindowController.makeCaption(
-            "Typed insertion is slower but can work better in apps where paste is unreliable.")
-
         let textInsertion = buildSection(title: "Text Insertion",
                                          rows: [methodRow, delayRow])
         let sentenceHandling = buildSection(title: "Sentence Handling",
-                                            rows: [autoEndPeriodCheckbox,
-                                                   sentencePauseRow,
-                                                   sentencePauseMaxRow,
+                                            rows: [autoEndRow,
                                                    trailingPeriodRow])
-        let notes = buildSection(title: "Notes", rows: [notesText])
 
         let inset = PreferencesWindowController.paneInset
         let gap = PreferencesWindowController.sectionGap
         let after1 = placeSection(textInsertion, in: pane, below: pane.topAnchor, topConstant: inset)
         let after2 = placeSection(sentenceHandling, in: pane, below: after1, topConstant: gap)
-        let after3 = placeSection(notes, in: pane, below: after2, topConstant: gap)
-        pane.bottomAnchor.constraint(greaterThanOrEqualTo: after3, constant: inset).isActive = true
+        pane.bottomAnchor.constraint(greaterThanOrEqualTo: after2, constant: inset).isActive = true
         return pane
     }
 
@@ -988,7 +1197,23 @@ final class PreferencesWindowController: NSWindowController,
         threadsField.widthAnchor.constraint(equalToConstant: 60).isActive = true
         let threadsHint = PreferencesWindowController.makeHint(
             PreferencesWindowController.threadsHintString())
-        let threadsControl = NSStackView(views: [threadsField, threadsStepper, threadsHint])
+        let threadsHelp = HelpButton(text:
+            "How many worker threads the local speech engine runs in " +
+            "parallel while transcribing.\n\n" +
+            "More threads = faster transcription, up to a point. The " +
+            "maximum shown is your Mac's logical processor count. On " +
+            "chips with hyperthreading that's roughly double the " +
+            "physical core count. Running at max will make the rest " +
+            "of your Mac feel sluggish while dictation is being " +
+            "processed.\n\n" +
+            "The recommendation shown next to this field is typically " +
+            "a third to a half of the maximum, which stays responsive. " +
+            "Going higher gives diminishing returns past the physical " +
+            "core count and can get worse on multi-socket machines. " +
+            "Go lower if other apps feel laggy during transcription.")
+        let threadsControl = NSStackView(views: [
+            threadsField, threadsStepper, threadsHint, threadsHelp
+        ])
         threadsControl.orientation = .horizontal
         threadsControl.spacing = 8
         let (threadsRow, threadsLabelRef) = buildLabeledRow(
@@ -997,8 +1222,21 @@ final class PreferencesWindowController: NSWindowController,
 
         beamField.widthAnchor.constraint(equalToConstant: 60).isActive = true
         let beamHint = PreferencesWindowController.makeHint(
-            "1 = fastest · 3 = default · 10 = slowest")
-        let beamControl = NSStackView(views: [beamField, beamStepper, beamHint])
+            "default 3 · 1-10")
+        let beamHelp = HelpButton(text:
+            "How many possible word interpretations the speech engine " +
+            "considers at once for each piece of audio.\n\n" +
+            "Higher = more accurate but slower. Lower = faster but the " +
+            "engine commits to its first guess and can miss the right " +
+            "word.\n\n" +
+            "Example: with 1, the engine picks the single most likely " +
+            "word immediately: fastest but prone to hearing \"to\" " +
+            "when you said \"two.\" With 10, it keeps 10 candidates " +
+            "alive and picks the best-fitting one: noticeably slower " +
+            "but catches these distinctions.")
+        let beamControl = NSStackView(views: [
+            beamField, beamStepper, beamHint, beamHelp
+        ])
         beamControl.orientation = .horizontal
         beamControl.spacing = 8
         let (beamRow, beamLabelRef) = buildLabeledRow(
@@ -1100,19 +1338,27 @@ final class PreferencesWindowController: NSWindowController,
         beamStepper.integerValue = beam
         saveDebugRecordingsCheckbox.state = Preferences.shared.saveDebugRecordings ? .on : .off
         silenceAutoStopCheckbox.state = Preferences.shared.silenceAutoStopEnabled ? .on : .off
-        silenceThresholdField.stringValue = String(format: "%.3f",
+        silenceThresholdField.stringValue = String(format: "%.4f",
             Preferences.shared.silenceAutoStopThreshold)
+        silenceThresholdStepper.doubleValue = Preferences.shared.silenceAutoStopThreshold
         silenceSecondsField.stringValue = String(format: "%.1f",
             Preferences.shared.silenceAutoStopSeconds)
+        silenceSecondsStepper.doubleValue = Preferences.shared.silenceAutoStopSeconds
         continuousDictationCheckbox.state =
             Preferences.shared.continuousDictationEnabled ? .on : .off
         continuousPauseField.stringValue = String(format: "%.1f",
             Preferences.shared.continuousDictationPauseSeconds)
+        continuousPauseStepper.doubleValue =
+            Preferences.shared.continuousDictationPauseSeconds
         continuousMaxChunkField.stringValue = String(format: "%.1f",
             Preferences.shared.continuousDictationMaxChunkSeconds)
+        continuousMaxChunkStepper.doubleValue =
+            Preferences.shared.continuousDictationMaxChunkSeconds
         continuousPromptChainCheckbox.state =
             Preferences.shared.continuousDictationPromptChainEnabled ? .on : .off
         continuousPromptChainMaxCharsField.integerValue =
+            Preferences.shared.continuousDictationPromptChainMaxChars
+        continuousPromptChainMaxCharsStepper.integerValue =
             Preferences.shared.continuousDictationPromptChainMaxChars
         stripWhisperPunctuationCheckbox.state =
             Preferences.shared.continuousDictationStripWhisperPunctuation ? .on : .off
@@ -1227,6 +1473,58 @@ final class PreferencesWindowController: NSWindowController,
         transcriptionModelRow?.isHidden = isOpenAI
         transcriptionModelsFolderSection?.isHidden = isOpenAI
         transcriptionApiKeyRow?.isHidden = !isOpenAI
+        updateContinuousDictationControls()
+        updateSilenceDetectionControls()
+    }
+
+    private func updateSilenceDetectionControls() {
+        // Silence level is the shared "what counts as silent" RMS definition;
+        // both toggle-mode auto-stop and continuous-mode chunk boundary
+        // detection read it. Stays enabled regardless of the auto-stop state.
+        // Silence duration is auto-stop specific: it only has an effect when
+        // the Auto stop checkbox is on.
+        let autoStopOn = silenceAutoStopCheckbox.state == .on
+        let labelActive = autoStopOn ? NSColor.labelColor : NSColor.disabledControlTextColor
+        silenceSecondsField.isEnabled = autoStopOn
+        silenceSecondsStepper.isEnabled = autoStopOn
+        silenceSecondsLabel?.textColor = labelActive
+    }
+
+    private func updateContinuousDictationControls() {
+        let enabled = continuousDictationCheckbox.state == .on
+        let promptChainOn = enabled && continuousPromptChainCheckbox.state == .on
+        let trailingPeriodOn = autoEndPeriodCheckbox.state == .on
+        let labelActive = enabled ? NSColor.labelColor : NSColor.disabledControlTextColor
+        let promptCharsLabelActive =
+            promptChainOn ? NSColor.labelColor : NSColor.disabledControlTextColor
+        let trailingPeriodLabelActive =
+            trailingPeriodOn ? NSColor.labelColor : NSColor.disabledControlTextColor
+
+        continuousPauseField.isEnabled = enabled
+        continuousPauseStepper.isEnabled = enabled
+        continuousMaxChunkField.isEnabled = enabled
+        continuousMaxChunkStepper.isEnabled = enabled
+        continuousSentencePauseField.isEnabled = enabled
+        continuousSentencePauseStepper.isEnabled = enabled
+        continuousSentencePauseMaxField.isEnabled = enabled
+        continuousSentencePauseMaxStepper.isEnabled = enabled
+        stripWhisperPunctuationCheckbox.isEnabled = enabled
+        continuousPromptChainCheckbox.isEnabled = enabled
+        continuousPromptChainMaxCharsField.isEnabled = promptChainOn
+        continuousPromptChainMaxCharsStepper.isEnabled = promptChainOn
+
+        // Auto trailing period applies in both modes, so stays enabled
+        // regardless of continuous dictation state. The seconds field below
+        // gates on the checkbox instead.
+        continuousTrailingPeriodField.isEnabled = trailingPeriodOn
+        continuousTrailingPeriodStepper.isEnabled = trailingPeriodOn
+
+        continuousPauseLabel?.textColor = labelActive
+        continuousMaxChunkLabel?.textColor = labelActive
+        continuousSentencePauseLabel?.textColor = labelActive
+        continuousSentencePauseMaxLabel?.textColor = labelActive
+        continuousPromptChainMaxCharsLabel?.textColor = promptCharsLabelActive
+        continuousTrailingPeriodLabel?.textColor = trailingPeriodLabelActive
     }
 
     // MARK: - Model discovery
@@ -1357,6 +1655,7 @@ final class PreferencesWindowController: NSWindowController,
         // flip back in the UI so the user sees the other checkbox clear.
         continuousDictationCheckbox.state =
             Preferences.shared.continuousDictationEnabled ? .on : .off
+        updateSilenceDetectionControls()
     }
 
     @objc private func continuousDictationChanged() {
@@ -1364,11 +1663,13 @@ final class PreferencesWindowController: NSWindowController,
             (continuousDictationCheckbox.state == .on)
         silenceAutoStopCheckbox.state =
             Preferences.shared.silenceAutoStopEnabled ? .on : .off
+        updateContinuousDictationControls()
     }
 
     @objc private func continuousPromptChainChanged() {
         Preferences.shared.continuousDictationPromptChainEnabled =
             (continuousPromptChainCheckbox.state == .on)
+        updateContinuousDictationControls()
     }
 
     @objc private func stripWhisperPunctuationChanged() {
@@ -1379,12 +1680,53 @@ final class PreferencesWindowController: NSWindowController,
     @objc private func autoEndPeriodChanged() {
         Preferences.shared.continuousDictationAutoEndPeriod =
             (autoEndPeriodCheckbox.state == .on)
+        updateContinuousDictationControls()
     }
 
     @objc private func typedDelayStepperChanged() {
         let value = typedDelayStepper.integerValue
         typedDelayField.integerValue = value
         Preferences.shared.typedKeystrokeDelayMs = value
+    }
+
+    @objc private func silenceThresholdStepperChanged() {
+        let value = silenceThresholdStepper.doubleValue
+        silenceThresholdField.stringValue = String(format: "%.4f", value)
+        Preferences.shared.silenceAutoStopThreshold = value
+        setNumericFieldValid(field: silenceThresholdField,
+                             label: silenceThresholdLabel, valid: true)
+    }
+
+    @objc private func silenceSecondsStepperChanged() {
+        let value = silenceSecondsStepper.doubleValue
+        silenceSecondsField.stringValue = String(format: "%.1f", value)
+        Preferences.shared.silenceAutoStopSeconds = value
+        setNumericFieldValid(field: silenceSecondsField,
+                             label: silenceSecondsLabel, valid: true)
+    }
+
+    @objc private func continuousPauseStepperChanged() {
+        let value = continuousPauseStepper.doubleValue
+        continuousPauseField.stringValue = String(format: "%.1f", value)
+        Preferences.shared.continuousDictationPauseSeconds = value
+        setNumericFieldValid(field: continuousPauseField,
+                             label: continuousPauseLabel, valid: true)
+    }
+
+    @objc private func continuousMaxChunkStepperChanged() {
+        let value = continuousMaxChunkStepper.doubleValue
+        continuousMaxChunkField.stringValue = String(format: "%.1f", value)
+        Preferences.shared.continuousDictationMaxChunkSeconds = value
+        setNumericFieldValid(field: continuousMaxChunkField,
+                             label: continuousMaxChunkLabel, valid: true)
+    }
+
+    @objc private func continuousPromptChainMaxCharsStepperChanged() {
+        let value = continuousPromptChainMaxCharsStepper.integerValue
+        continuousPromptChainMaxCharsField.integerValue = value
+        Preferences.shared.continuousDictationPromptChainMaxChars = value
+        setNumericFieldValid(field: continuousPromptChainMaxCharsField,
+                             label: continuousPromptChainMaxCharsLabel, valid: true)
     }
 
     @objc private func continuousSentencePauseStepperChanged() {
@@ -1725,7 +2067,8 @@ final class PreferencesWindowController: NSWindowController,
                 setNumericFieldValid(field: typedDelayField, label: typedDelayLabel, valid: false)
             }
         case silenceThresholdField:
-            if let v = Double(silenceThresholdField.stringValue), v >= 0.01 {
+            if let v = Double(silenceThresholdField.stringValue), v >= 0.0001, v <= 0.5 {
+                silenceThresholdStepper.doubleValue = v
                 Preferences.shared.silenceAutoStopThreshold = v
                 setNumericFieldValid(field: silenceThresholdField,
                                      label: silenceThresholdLabel, valid: true)
@@ -1734,7 +2077,8 @@ final class PreferencesWindowController: NSWindowController,
                                      label: silenceThresholdLabel, valid: false)
             }
         case silenceSecondsField:
-            if let v = Double(silenceSecondsField.stringValue), v >= 1.2 {
+            if let v = Double(silenceSecondsField.stringValue), v >= 1.2, v <= 10.0 {
+                silenceSecondsStepper.doubleValue = v
                 Preferences.shared.silenceAutoStopSeconds = v
                 setNumericFieldValid(field: silenceSecondsField,
                                      label: silenceSecondsLabel, valid: true)
@@ -1744,6 +2088,7 @@ final class PreferencesWindowController: NSWindowController,
             }
         case continuousPauseField:
             if let v = Double(continuousPauseField.stringValue), v >= 0.3, v <= 2.0 {
+                continuousPauseStepper.doubleValue = v
                 Preferences.shared.continuousDictationPauseSeconds = v
                 setNumericFieldValid(field: continuousPauseField,
                                      label: continuousPauseLabel, valid: true)
@@ -1753,6 +2098,7 @@ final class PreferencesWindowController: NSWindowController,
             }
         case continuousMaxChunkField:
             if let v = Double(continuousMaxChunkField.stringValue), v >= 5.0, v <= 30.0 {
+                continuousMaxChunkStepper.doubleValue = v
                 Preferences.shared.continuousDictationMaxChunkSeconds = v
                 setNumericFieldValid(field: continuousMaxChunkField,
                                      label: continuousMaxChunkLabel, valid: true)
@@ -1763,6 +2109,7 @@ final class PreferencesWindowController: NSWindowController,
         case continuousPromptChainMaxCharsField:
             if let v = Int(continuousPromptChainMaxCharsField.stringValue),
                v >= 100, v <= 900 {
+                continuousPromptChainMaxCharsStepper.integerValue = v
                 Preferences.shared.continuousDictationPromptChainMaxChars = v
                 setNumericFieldValid(field: continuousPromptChainMaxCharsField,
                                      label: continuousPromptChainMaxCharsLabel, valid: true)
@@ -1822,10 +2169,10 @@ final class PreferencesWindowController: NSWindowController,
             return v >= 5 && v <= 100
         case silenceThresholdField:
             guard let v = Double(silenceThresholdField.stringValue) else { return false }
-            return v >= 0.01
+            return v >= 0.0001 && v <= 0.5
         case silenceSecondsField:
             guard let v = Double(silenceSecondsField.stringValue) else { return false }
-            return v >= 1.2
+            return v >= 1.2 && v <= 10.0
         case continuousPauseField:
             guard let v = Double(continuousPauseField.stringValue) else { return false }
             return v >= 0.3 && v <= 2.0
@@ -1870,27 +2217,37 @@ final class PreferencesWindowController: NSWindowController,
             typedDelayStepper.integerValue = v
             setNumericFieldValid(field: typedDelayField, label: typedDelayLabel, valid: true)
         case silenceThresholdField:
-            silenceThresholdField.stringValue = String(format: "%.3f",
+            silenceThresholdField.stringValue = String(format: "%.4f",
                 Preferences.shared.silenceAutoStopThreshold)
+            silenceThresholdStepper.doubleValue =
+                Preferences.shared.silenceAutoStopThreshold
             setNumericFieldValid(field: silenceThresholdField,
                                  label: silenceThresholdLabel, valid: true)
         case silenceSecondsField:
             silenceSecondsField.stringValue = String(format: "%.1f",
                 Preferences.shared.silenceAutoStopSeconds)
+            silenceSecondsStepper.doubleValue =
+                Preferences.shared.silenceAutoStopSeconds
             setNumericFieldValid(field: silenceSecondsField,
                                  label: silenceSecondsLabel, valid: true)
         case continuousPauseField:
             continuousPauseField.stringValue = String(format: "%.1f",
                 Preferences.shared.continuousDictationPauseSeconds)
+            continuousPauseStepper.doubleValue =
+                Preferences.shared.continuousDictationPauseSeconds
             setNumericFieldValid(field: continuousPauseField,
                                  label: continuousPauseLabel, valid: true)
         case continuousMaxChunkField:
             continuousMaxChunkField.stringValue = String(format: "%.1f",
                 Preferences.shared.continuousDictationMaxChunkSeconds)
+            continuousMaxChunkStepper.doubleValue =
+                Preferences.shared.continuousDictationMaxChunkSeconds
             setNumericFieldValid(field: continuousMaxChunkField,
                                  label: continuousMaxChunkLabel, valid: true)
         case continuousPromptChainMaxCharsField:
             continuousPromptChainMaxCharsField.integerValue =
+                Preferences.shared.continuousDictationPromptChainMaxChars
+            continuousPromptChainMaxCharsStepper.integerValue =
                 Preferences.shared.continuousDictationPromptChainMaxChars
             setNumericFieldValid(field: continuousPromptChainMaxCharsField,
                                  label: continuousPromptChainMaxCharsLabel, valid: true)
@@ -2132,6 +2489,94 @@ fileprivate enum LaunchAtLogin {
 
     private static func uninstall() {
         try? FileManager.default.removeItem(at: plistURL)
+    }
+}
+
+// Popover content for a single help button. Plain-text body with word
+// wrapping. Deliberately avoids the 10.12+ wrappingLabelWithString
+// convenience initializer; configures NSTextField manually so it still
+// builds against the 10.11 deployment target.
+final class HelpPopoverViewController: NSViewController {
+    private let helpText: String
+    private static let contentWidth: CGFloat = 340
+    private static let margin: CGFloat = 14
+
+    init(text: String) {
+        self.helpText = text
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func loadView() {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = NSTextField()
+        label.stringValue = helpText
+        label.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        label.textColor = NSColor.labelColor
+        label.isEditable = false
+        label.isSelectable = true
+        label.isBordered = false
+        label.drawsBackground = false
+        label.lineBreakMode = .byWordWrapping
+        label.cell?.wraps = true
+        label.cell?.isScrollable = false
+        label.maximumNumberOfLines = 0
+        let textWidth =
+            HelpPopoverViewController.contentWidth - 2 * HelpPopoverViewController.margin
+        label.preferredMaxLayoutWidth = textWidth
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(
+                equalTo: container.topAnchor,
+                constant: HelpPopoverViewController.margin),
+            label.leadingAnchor.constraint(
+                equalTo: container.leadingAnchor,
+                constant: HelpPopoverViewController.margin),
+            label.trailingAnchor.constraint(
+                equalTo: container.trailingAnchor,
+                constant: -HelpPopoverViewController.margin),
+            label.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor,
+                constant: -HelpPopoverViewController.margin),
+            container.widthAnchor.constraint(
+                equalToConstant: HelpPopoverViewController.contentWidth)
+        ])
+        self.view = container
+    }
+}
+
+// Round "?" button that reveals a popover with the given text on click.
+// Toggles the popover: a second click while it's visible closes it.
+final class HelpButton: NSButton {
+    private let helpText: String
+    private var popover: NSPopover?
+
+    init(text: String) {
+        self.helpText = text
+        super.init(frame: .zero)
+        self.bezelStyle = .helpButton
+        self.setButtonType(.momentaryPushIn)
+        self.title = ""
+        self.translatesAutoresizingMaskIntoConstraints = false
+        self.target = self
+        self.action = #selector(showHelp)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    @objc private func showHelp() {
+        if let pop = popover, pop.isShown {
+            pop.performClose(nil)
+            return
+        }
+        let pop = NSPopover()
+        pop.behavior = .transient
+        pop.contentViewController = HelpPopoverViewController(text: helpText)
+        pop.show(relativeTo: self.bounds, of: self, preferredEdge: .maxY)
+        self.popover = pop
     }
 }
 
