@@ -233,6 +233,8 @@ final class PreferencesWindowController: NSWindowController,
     private let continuousPauseStepper = NSStepper()
     private let continuousMaxChunkField = NSTextField()
     private let continuousMaxChunkStepper = NSStepper()
+    private let continuousChunkOverlapField = NSTextField()
+    private let continuousChunkOverlapStepper = NSStepper()
     private let continuousPromptChainCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
@@ -298,6 +300,12 @@ final class PreferencesWindowController: NSWindowController,
         b.title = "Capitalize first letter at line start"
         return b
     }()
+    private let filterDuplicatesCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Filter consecutive duplicate words"
+        return b
+    }()
 
     // Labels for numeric fields that use range validation. Captured during
     // layout so the delegate can toggle their text color on invalid input.
@@ -308,6 +316,7 @@ final class PreferencesWindowController: NSWindowController,
     private var silenceSecondsLabel: NSTextField?
     private var continuousPauseLabel: NSTextField?
     private var continuousMaxChunkLabel: NSTextField?
+    private var continuousChunkOverlapLabel: NSTextField?
     private var continuousPromptChainMaxCharsLabel: NSTextField?
     private var continuousSentencePauseLabel: NSTextField?
     private var continuousSentencePauseMaxLabel: NSTextField?
@@ -470,6 +479,7 @@ final class PreferencesWindowController: NSWindowController,
         continuousDictationCheckbox.action = #selector(continuousDictationChanged)
         continuousPauseField.delegate = self
         continuousMaxChunkField.delegate = self
+        continuousChunkOverlapField.delegate = self
         continuousPromptChainCheckbox.target = self
         continuousPromptChainCheckbox.action = #selector(continuousPromptChainChanged)
         continuousPromptChainMaxCharsField.delegate = self
@@ -490,6 +500,8 @@ final class PreferencesWindowController: NSWindowController,
         applyTextSubstitutionsCheckbox.action = #selector(applyTextSubstitutionsChanged)
         capitalizeFirstLetterCheckbox.target = self
         capitalizeFirstLetterCheckbox.action = #selector(capitalizeFirstLetterChanged)
+        filterDuplicatesCheckbox.target = self
+        filterDuplicatesCheckbox.action = #selector(filterDuplicatesChanged)
         continuousSentencePauseField.delegate = self
         continuousSentencePauseStepper.minValue = 0.1
         continuousSentencePauseStepper.maxValue = 5.0
@@ -549,6 +561,13 @@ final class PreferencesWindowController: NSWindowController,
         continuousMaxChunkStepper.valueWraps = false
         continuousMaxChunkStepper.target = self
         continuousMaxChunkStepper.action = #selector(continuousMaxChunkStepperChanged)
+
+        continuousChunkOverlapStepper.minValue = 0.0
+        continuousChunkOverlapStepper.maxValue = 1.5
+        continuousChunkOverlapStepper.increment = 0.1
+        continuousChunkOverlapStepper.valueWraps = false
+        continuousChunkOverlapStepper.target = self
+        continuousChunkOverlapStepper.action = #selector(continuousChunkOverlapStepperChanged)
 
         continuousPromptChainMaxCharsStepper.minValue = 100
         continuousPromptChainMaxCharsStepper.maxValue = 900
@@ -973,7 +992,8 @@ final class PreferencesWindowController: NSWindowController,
 
         let lw = PreferencesWindowController.widestLabelWidth(
             ["Backend:", "Local model:", "OpenAI API key:", "Location:",
-             "Pause:", "Max chunk:", "Sentence pause:", "Window threshold:",
+             "Pause:", "Max chunk:", "Chunk overlap:",
+             "Sentence pause:", "Window threshold:",
              "Max chars:"])
 
         let backendRow = buildRowView(labelText: "Backend:",
@@ -1062,6 +1082,31 @@ final class PreferencesWindowController: NSWindowController,
         let (maxChunkRow, maxChunkLabelRef) = buildLabeledRow(
             labelText: "Max chunk:", control: maxChunkControl, labelWidth: lw)
         continuousMaxChunkLabel = maxChunkLabelRef
+
+        continuousChunkOverlapField.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let chunkOverlapHint = PreferencesWindowController.makeHint(
+            "seconds · default 0.0 · 0-1.5")
+        let chunkOverlapHelp = HelpButton(text:
+            "When Max chunk forces a cut in the middle of your speech, " +
+            "keeps the last fraction of a second of audio and feeds it " +
+            "into the next chunk as well. The speech engine then sees " +
+            "the boundary word with full context on at least one side, " +
+            "instead of a clipped fragment on both sides.\n\n" +
+            "The duplicate text that would appear in the next chunk is " +
+            "detected and dropped automatically. If the detection fails, " +
+            "a word or two may appear twice. Set to 0 to disable " +
+            "entirely and keep the original cut-and-resume behavior.\n\n" +
+            "Only affects Max chunk cuts (mid-speech). Natural pause " +
+            "cuts never overlap because they end in silence already.")
+        let chunkOverlapControl = NSStackView(views: [
+            continuousChunkOverlapField, continuousChunkOverlapStepper,
+            chunkOverlapHint, chunkOverlapHelp
+        ])
+        chunkOverlapControl.orientation = .horizontal
+        chunkOverlapControl.spacing = 8
+        let (chunkOverlapRow, chunkOverlapLabelRef) = buildLabeledRow(
+            labelText: "Chunk overlap:", control: chunkOverlapControl, labelWidth: lw)
+        continuousChunkOverlapLabel = chunkOverlapLabelRef
 
         continuousSentencePauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let sentencePauseHelp = HelpButton(text:
@@ -1175,6 +1220,7 @@ final class PreferencesWindowController: NSWindowController,
 
         let behavior = buildSection(title: "Behavior",
                                     rows: [continuousStack, pauseRow, maxChunkRow,
+                                           chunkOverlapRow,
                                            sentencePauseRow, sentencePauseMaxRow,
                                            stripRow,
                                            promptChainRow, promptCharsRow])
@@ -1492,6 +1538,21 @@ final class PreferencesWindowController: NSWindowController,
         let firstLetterRow = makeIndentedRow(
             views: [capitalizeFirstLetterCheckbox, firstLetterHelp], indent: indent)
 
+        let filterDuplicatesHelp = HelpButton(text:
+            "Collapses the second of any two identical words that appear " +
+            "right next to each other, separated only by a space.\n\n" +
+            "Common cases this catches: speech-engine stutters (\"I I " +
+            "think\" becomes \"I think\"), repeated short words whisper " +
+            "sometimes doubles, and duplicate words that leak through the " +
+            "chunk-overlap boundary when whisper transcribes the overlapped " +
+            "audio slightly differently in the two chunks.\n\n" +
+            "Not collapsed: words separated by punctuation (\"very, very " +
+            "good\" stays intact because the comma signals deliberate " +
+            "emphasis). Also not collapsed: words that differ in any way, " +
+            "including casing of the alphanumeric part.")
+        let filterDuplicatesRow = makeIndentedRow(
+            views: [filterDuplicatesCheckbox, filterDuplicatesHelp], indent: indent)
+
         let performance = buildSection(title: "Performance",
                                        rows: [threadsRow, beamRow])
         let diagnostics = buildSection(title: "Diagnostics",
@@ -1502,7 +1563,8 @@ final class PreferencesWindowController: NSWindowController,
                                              normalizeCapRow,
                                              fixupsRow,
                                              substitutionsRow,
-                                             firstLetterRow])
+                                             firstLetterRow,
+                                             filterDuplicatesRow])
         let reset = buildSection(title: "Reset", rows: [resetStack])
 
         let inset = PreferencesWindowController.paneInset
@@ -1887,6 +1949,10 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.continuousDictationMaxChunkSeconds)
         continuousMaxChunkStepper.doubleValue =
             Preferences.shared.continuousDictationMaxChunkSeconds
+        continuousChunkOverlapField.stringValue = String(format: "%.1f",
+            Preferences.shared.continuousDictationChunkOverlapSeconds)
+        continuousChunkOverlapStepper.doubleValue =
+            Preferences.shared.continuousDictationChunkOverlapSeconds
         continuousPromptChainCheckbox.state =
             Preferences.shared.continuousDictationPromptChainEnabled ? .on : .off
         continuousPromptChainMaxCharsField.integerValue =
@@ -1924,6 +1990,8 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.applyTextSubstitutions ? .on : .off
         capitalizeFirstLetterCheckbox.state =
             Preferences.shared.capitalizeFirstLetterAtLineStart ? .on : .off
+        filterDuplicatesCheckbox.state =
+            Preferences.shared.filterConsecutiveDuplicates ? .on : .off
         updateConditionalRows()
     }
 
@@ -2034,6 +2102,7 @@ final class PreferencesWindowController: NSWindowController,
         applyProperNounFixupsCheckbox.isEnabled = enabled
         applyTextSubstitutionsCheckbox.isEnabled = enabled
         capitalizeFirstLetterCheckbox.isEnabled = enabled
+        filterDuplicatesCheckbox.isEnabled = enabled
     }
 
     private func updateSilenceDetectionControls() {
@@ -2063,6 +2132,8 @@ final class PreferencesWindowController: NSWindowController,
         continuousPauseStepper.isEnabled = enabled
         continuousMaxChunkField.isEnabled = enabled
         continuousMaxChunkStepper.isEnabled = enabled
+        continuousChunkOverlapField.isEnabled = enabled
+        continuousChunkOverlapStepper.isEnabled = enabled
         continuousSentencePauseField.isEnabled = enabled
         continuousSentencePauseStepper.isEnabled = enabled
         continuousSentencePauseMaxField.isEnabled = enabled
@@ -2080,6 +2151,7 @@ final class PreferencesWindowController: NSWindowController,
 
         continuousPauseLabel?.textColor = labelActive
         continuousMaxChunkLabel?.textColor = labelActive
+        continuousChunkOverlapLabel?.textColor = labelActive
         continuousSentencePauseLabel?.textColor = labelActive
         continuousSentencePauseMaxLabel?.textColor = labelActive
         continuousPromptChainMaxCharsLabel?.textColor = promptCharsLabelActive
@@ -2273,6 +2345,11 @@ final class PreferencesWindowController: NSWindowController,
             (capitalizeFirstLetterCheckbox.state == .on)
     }
 
+    @objc private func filterDuplicatesChanged() {
+        Preferences.shared.filterConsecutiveDuplicates =
+            (filterDuplicatesCheckbox.state == .on)
+    }
+
     @objc private func typedDelayStepperChanged() {
         let value = typedDelayStepper.integerValue
         typedDelayField.integerValue = value
@@ -2309,6 +2386,14 @@ final class PreferencesWindowController: NSWindowController,
         Preferences.shared.continuousDictationMaxChunkSeconds = value
         setNumericFieldValid(field: continuousMaxChunkField,
                              label: continuousMaxChunkLabel, valid: true)
+    }
+
+    @objc private func continuousChunkOverlapStepperChanged() {
+        let value = continuousChunkOverlapStepper.doubleValue
+        continuousChunkOverlapField.stringValue = String(format: "%.1f", value)
+        Preferences.shared.continuousDictationChunkOverlapSeconds = value
+        setNumericFieldValid(field: continuousChunkOverlapField,
+                             label: continuousChunkOverlapLabel, valid: true)
     }
 
     @objc private func continuousPromptChainMaxCharsStepperChanged() {
@@ -2461,10 +2546,21 @@ final class PreferencesWindowController: NSWindowController,
     @objc private func clearDebugRecordings() {
         let fm = FileManager.default
         let dir = Preferences.debugRecordingsDirectory
-        let files = (try? fm.contentsOfDirectory(at: dir,
-                                                 includingPropertiesForKeys: nil)) ?? []
-        let wavs = files.filter { $0.pathExtension.lowercased() == "wav" }
-        guard !wavs.isEmpty else {
+        let topLevel = (try? fm.contentsOfDirectory(at: dir,
+                                                    includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        let topWavs = topLevel.filter { $0.pathExtension.lowercased() == "wav" }
+        let sessionDirs = topLevel.filter {
+            $0.lastPathComponent.hasPrefix("session-")
+                && ((try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true)
+        }
+        var sessionWavCount = 0
+        for session in sessionDirs {
+            let children = (try? fm.contentsOfDirectory(at: session,
+                                                        includingPropertiesForKeys: nil)) ?? []
+            sessionWavCount += children.filter { $0.pathExtension.lowercased() == "wav" }.count
+        }
+        let totalWavs = topWavs.count + sessionWavCount
+        guard totalWavs > 0 else {
             let alert = NSAlert()
             alert.messageText = "No debug recordings to clear."
             alert.informativeText = dir.path
@@ -2472,13 +2568,16 @@ final class PreferencesWindowController: NSWindowController,
             return
         }
         let confirm = NSAlert()
-        confirm.messageText = "Delete \(wavs.count) debug recording\(wavs.count == 1 ? "" : "s")?"
-        confirm.informativeText = "This permanently removes every .wav in:\n\(dir.path)"
+        confirm.messageText = "Delete \(totalWavs) debug recording\(totalWavs == 1 ? "" : "s")?"
+        confirm.informativeText = "This permanently removes every .wav (and its sidecar .txt) in:\n\(dir.path)"
         confirm.addButton(withTitle: "Delete")
         confirm.addButton(withTitle: "Cancel")
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
-        for url in wavs {
+        for url in topWavs {
             try? fm.removeItem(at: url)
+        }
+        for session in sessionDirs {
+            try? fm.removeItem(at: session)
         }
     }
 
@@ -2620,6 +2719,7 @@ final class PreferencesWindowController: NSWindowController,
         case silenceSecondsField: label = silenceSecondsLabel
         case continuousPauseField: label = continuousPauseLabel
         case continuousMaxChunkField: label = continuousMaxChunkLabel
+        case continuousChunkOverlapField: label = continuousChunkOverlapLabel
         case continuousPromptChainMaxCharsField: label = continuousPromptChainMaxCharsLabel
         case continuousSentencePauseField: label = continuousSentencePauseLabel
         case continuousSentencePauseMaxField: label = continuousSentencePauseMaxLabel
@@ -2696,6 +2796,17 @@ final class PreferencesWindowController: NSWindowController,
                 setNumericFieldValid(field: continuousMaxChunkField,
                                      label: continuousMaxChunkLabel, valid: false)
             }
+        case continuousChunkOverlapField:
+            if let v = Double(continuousChunkOverlapField.stringValue),
+               v >= 0.0, v <= 1.5 {
+                continuousChunkOverlapStepper.doubleValue = v
+                Preferences.shared.continuousDictationChunkOverlapSeconds = v
+                setNumericFieldValid(field: continuousChunkOverlapField,
+                                     label: continuousChunkOverlapLabel, valid: true)
+            } else {
+                setNumericFieldValid(field: continuousChunkOverlapField,
+                                     label: continuousChunkOverlapLabel, valid: false)
+            }
         case continuousPromptChainMaxCharsField:
             if let v = Int(continuousPromptChainMaxCharsField.stringValue),
                v >= 100, v <= 900 {
@@ -2769,6 +2880,9 @@ final class PreferencesWindowController: NSWindowController,
         case continuousMaxChunkField:
             guard let v = Double(continuousMaxChunkField.stringValue) else { return false }
             return v >= 5.0 && v <= 30.0
+        case continuousChunkOverlapField:
+            guard let v = Double(continuousChunkOverlapField.stringValue) else { return false }
+            return v >= 0.0 && v <= 1.5
         case continuousPromptChainMaxCharsField:
             guard let v = Int(continuousPromptChainMaxCharsField.stringValue) else { return false }
             return v >= 100 && v <= 900
@@ -2834,6 +2948,13 @@ final class PreferencesWindowController: NSWindowController,
                 Preferences.shared.continuousDictationMaxChunkSeconds
             setNumericFieldValid(field: continuousMaxChunkField,
                                  label: continuousMaxChunkLabel, valid: true)
+        case continuousChunkOverlapField:
+            continuousChunkOverlapField.stringValue = String(format: "%.1f",
+                Preferences.shared.continuousDictationChunkOverlapSeconds)
+            continuousChunkOverlapStepper.doubleValue =
+                Preferences.shared.continuousDictationChunkOverlapSeconds
+            setNumericFieldValid(field: continuousChunkOverlapField,
+                                 label: continuousChunkOverlapLabel, valid: true)
         case continuousPromptChainMaxCharsField:
             continuousPromptChainMaxCharsField.integerValue =
                 Preferences.shared.continuousDictationPromptChainMaxChars

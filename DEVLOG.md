@@ -1297,3 +1297,68 @@ Progress UI: shared progress bar + label below the three action buttons. Bar and
 Not implemented yet: background check on launch, downloaded-bundle code-signature validation, download resume on interrupt, checksum verification. All deferred to future work.
 
 CLAUDE.md: removed the `-Patch` hedge from the release-asset section. `-Full` is now described as the suffix the updater matches on, distinguishing the build from GitHub's auto-generated source-code zips.
+
+#### Acoustic overlap on max-chunk boundaries
+
+New `continuousDictationChunkOverlapSeconds` preference (default 0.0, range 0.0 to 1.5). When set to a positive value, max-chunk-triggered cuts retain the last N seconds of audio and prepend it to the next chunk's buffer so whisper sees acoustic context on both sides of a mid-speech cut. Pause-triggered cuts never overlap because they already end in silence.
+
+`AudioRecorder` changes:
+- `chunkBoundaryOverlapSeconds: TimeInterval?` property.
+- `overlapCarry: [Float]` private state, captured at emit time when the cut was max-chunk-driven, consumed on the next speech-begin transition.
+- `emitChunk()` now takes a `wasMaxChunkCut: Bool` parameter and only populates `overlapCarry` for the max-chunk path.
+- `onChunkBoundary` signature grew the `wasMaxChunkCut` bool so the consumer can decide whether to dedup.
+- Speech-begin transition prepends `overlapCarry` to the fresh buffer instead of unconditionally clearing, and seeds `chunkSampleCount` with the carry length so max-chunk duration counts overlapped audio against the cap.
+
+`StatusItemController` changes:
+- Tracks `previousChunkWasMaxCut` and `previousChunkTailTokens` across chunks within a session; both reset on session start.
+- Before `postProcessTranscript` runs on a chunk's raw text, if the prior chunk was a max-chunk cut and overlap was enabled, `dedupeOverlapTokens` tries to drop a matching leading-token prefix that equals a suffix of the prior chunk's tail tokens. Prefers the longest match; drops nothing if no match. An occasional duplicate is preferred over silently chopping real words.
+- Three new helpers (`isWordChar`, `trailingTokens`, `leadingTokensWithEnd`, `dedupeOverlapTokens`) handle Unicode-aware alphanumeric tokenization without Swift 5's `Character.isLetter`.
+
+Preferences UI:
+- New "Chunk overlap" row directly beneath "Max chunk" in the Transcription pane's Behavior section.
+- Field + stepper (increment 0.1), hint, help popover.
+- Gated with the rest of the continuous-dictation controls.
+- Validation range `[0.0, 1.5]`.
+
+Default of 0.0 preserves exact current behavior: no overlap, no dedup, no change to the existing chunk-boundary code path. Users opt in by raising the value.
+
+#### Consecutive-duplicate filter and overlap boundary logging
+
+Two changes addressing residual duplicates that the overlap dedup misses when whisper renders the overlapping word slightly differently in each chunk.
+
+**Filter.** New `filterConsecutiveDuplicates` preference (default on), exposed as the sixth checkbox in the Advanced tab's Transcript Processing section and gated under the root `Apply transcript processing` toggle. Collapses the second of any two adjacent identical alphanumeric tokens separated only by whitespace (no intervening punctuation). Case-insensitive, punctuation-insensitive on the compared tokens. Handles arbitrarily long runs (`no no no` → `no`). Preserves rhetorical emphasis marked by punctuation (`very, very good` left intact).
+
+Two passes per chunk:
+
+- Within-chunk pass runs `filterConsecutiveDuplicates` on the cleaned transcript.
+- Cross-chunk pass: if the first word of the current cleaned transcript exactly matches the lowercased last word of the previous chunk's injected text, drop it. Catches duplicates at the chunk boundary that overlap dedup missed because whisper transcribed the overlapped audio differently in the two chunks.
+
+New instance state `previousInjectedLastWord: String?` tracks the trailing injected word, captured via a new `lastWord(of:)` helper. Reset on session start along with the other continuous-session state.
+
+New static helpers in `StatusItemController`: `filterConsecutiveDuplicates(_:)`, `firstWord(of:)`, `lastWord(of:)`, reusing the existing `isWordChar` tokenizer.
+
+**Boundary logging.** When overlap dedup runs (max-chunk boundary with overlap configured), the log now includes the stored previous-chunk tail tokens, the incoming new-chunk head tokens, and the computed match length. Replaces the previous `trimmed leading tokens` one-liner. Also logs when the consecutive-duplicate filter collapses within-chunk repeats, and when the cross-chunk pass drops a boundary repeat with the word it dropped. All three log lines give enough visibility to tune overlap seconds against observed duplicate behavior without guessing.
+
+#### Per-chunk debug recordings
+
+Extends `Save debug recordings` so that while it's on and continuous dictation is active, each chunk's audio is written to disk at the moment it's enqueued for transcription, alongside a sibling `.txt` file written after transcription completes.
+
+Layout: `~/Library/Application Support/push-to-dictate/debug/session-<yyyyMMdd-HHmmss>/chunk-NNN-<reason>.wav` plus `chunk-NNN-<reason>.txt`. `<reason>` is `maxchunk` or `pause` depending on `wasMaxChunkCut`. Session folder is lazy-created on the first chunk of a dictation session; `debugSessionDir` and `debugChunkCounter` on `StatusItemController` reset at session start.
+
+Sidecar `.txt` contents, one per chunk:
+
+- wav filename, measured `gap` and `elapsed`, cut reason
+- whisper's raw transcript
+- post-overlap-dedup transcript
+- `prevTail` tokens that dedup compared against
+- `newHead` tokens seen in this chunk
+- `matchLen` (how many leading tokens the dedup dropped, 0 if none)
+- post-processing `cleaned` text
+- final `injected` string that reached the cursor
+- `prevInjectedLastWord` used by the cross-chunk duplicate filter
+
+Purpose: when a chunk boundary produces a weird transcription (hallucinated word, dropped word, double word that leaked through), the user can open the session folder, listen to the exact audio whisper received, and see in the sidecar why each stage decided what it did. Eliminates guessing from log inspection alone.
+
+`AudioRecorder.writeDebugWav` refactored: its WAV-writing core was pulled out into `static writeSamplesAsWav(samples:to:)` so `StatusItemController` can write per-chunk WAVs without duplicating AVAudioFile setup. Session-end full capture still uses the same path. No format change (16 kHz mono 16-bit PCM).
+
+`Clear Debug Recordings…` button now counts WAVs across both the top-level folder and all `session-*` subfolders, and deletes session folders entirely (which also removes their sidecar `.txt` files). Backward-compatible with the previous flat layout.

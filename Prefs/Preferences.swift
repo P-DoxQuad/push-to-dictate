@@ -41,6 +41,7 @@ final class Preferences {
         static let continuousDictationEnabled = "continuousDictationEnabled"
         static let continuousDictationPauseSeconds = "continuousDictationPauseSeconds"
         static let continuousDictationMaxChunkSeconds = "continuousDictationMaxChunkSeconds"
+        static let continuousDictationChunkOverlapSeconds = "continuousDictationChunkOverlapSeconds"
         static let continuousDictationPromptChainEnabled = "continuousDictationPromptChainEnabled"
         static let continuousDictationPromptChainMaxChars = "continuousDictationPromptChainMaxChars"
         static let continuousDictationStripWhisperPunctuation = "continuousDictationStripWhisperPunctuation"
@@ -54,6 +55,7 @@ final class Preferences {
         static let applyProperNounFixups = "applyProperNounFixups"
         static let applyTextSubstitutions = "applyTextSubstitutions"
         static let capitalizeFirstLetterAtLineStart = "capitalizeFirstLetterAtLineStart"
+        static let filterConsecutiveDuplicates = "filterConsecutiveDuplicates"
     }
 
     static let noSoundName = "None"
@@ -219,6 +221,11 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.continuousDictationMaxChunkSeconds) }
     }
 
+    var continuousDictationChunkOverlapSeconds: Double {
+        get { return defaults.double(forKey: Key.continuousDictationChunkOverlapSeconds) }
+        set { defaults.set(newValue, forKey: Key.continuousDictationChunkOverlapSeconds) }
+    }
+
     var continuousDictationPromptChainEnabled: Bool {
         get {
             if defaults.object(forKey: Key.continuousDictationPromptChainEnabled) == nil {
@@ -342,6 +349,14 @@ final class Preferences {
             return defaults.bool(forKey: Key.capitalizeFirstLetterAtLineStart)
         }
         set { defaults.set(newValue, forKey: Key.capitalizeFirstLetterAtLineStart) }
+    }
+
+    var filterConsecutiveDuplicates: Bool {
+        get {
+            if defaults.object(forKey: Key.filterConsecutiveDuplicates) == nil { return true }
+            return defaults.bool(forKey: Key.filterConsecutiveDuplicates)
+        }
+        set { defaults.set(newValue, forKey: Key.filterConsecutiveDuplicates) }
     }
 
     // Words / tokens that the post-processing casing normalizer would
@@ -633,6 +648,7 @@ final class Preferences {
         Key.skippedUpdateVersion,
         Key.continuousDictationEnabled, Key.continuousDictationPauseSeconds,
         Key.continuousDictationMaxChunkSeconds,
+        Key.continuousDictationChunkOverlapSeconds,
         Key.continuousDictationPromptChainEnabled,
         Key.continuousDictationPromptChainMaxChars,
         Key.continuousDictationStripWhisperPunctuation,
@@ -645,7 +661,8 @@ final class Preferences {
         Key.normalizeCapitalization,
         Key.applyProperNounFixups,
         Key.applyTextSubstitutions,
-        Key.capitalizeFirstLetterAtLineStart
+        Key.capitalizeFirstLetterAtLineStart,
+        Key.filterConsecutiveDuplicates
     ]
 
     // MARK: - Keychain
