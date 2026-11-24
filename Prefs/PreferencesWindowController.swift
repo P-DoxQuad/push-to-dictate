@@ -18,6 +18,89 @@ final class PreferencesWindowController: NSWindowController,
 
     var onHotkeyChanged: (() -> Void)?
     var onColoredIconChanged: (() -> Void)?
+    var onUpdateCheckResult: ((UpdateCheckResult) -> Void)?
+    var onUpdateSkipped: ((String) -> Void)?
+
+    // MARK: - Inline update check state
+
+    private let updateCheckButton: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .rounded
+        b.title = "Check for Updates\u{2026}"
+        return b
+    }()
+    private let updateSpinner: NSProgressIndicator = {
+        let s = NSProgressIndicator(frame: .zero)
+        s.style = .spinning
+        s.isIndeterminate = true
+        s.controlSize = .small
+        return s
+    }()
+    private let updateStatusLabel: NSTextField = {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false; f.isSelectable = false
+        f.isBordered = false; f.drawsBackground = false
+        f.font = NSFont.boldSystemFont(ofSize: 14)
+        f.alignment = .center
+        return f
+    }()
+    private let updateDetailLabel: NSTextField = {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false; f.isSelectable = false
+        f.isBordered = false; f.drawsBackground = false
+        f.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        f.textColor = .secondaryLabelColor
+        f.lineBreakMode = .byWordWrapping
+        f.cell?.wraps = true
+        f.cell?.isScrollable = false
+        f.preferredMaxLayoutWidth = 360
+        f.alignment = .center
+        return f
+    }()
+    private let updateDownloadButton: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .rounded
+        b.title = "Download & Install"
+        return b
+    }()
+    private let updateOpenReleaseButton: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .rounded
+        b.title = "Open Release Page"
+        return b
+    }()
+    private let updateSkipButton: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .rounded
+        b.title = "Skip This Update"
+        return b
+    }()
+    private let updateProgressBar: NSProgressIndicator = {
+        let p = NSProgressIndicator(frame: .zero)
+        p.style = .bar
+        p.isIndeterminate = false
+        p.minValue = 0
+        p.maxValue = 1
+        p.doubleValue = 0
+        p.controlSize = .small
+        return p
+    }()
+    private let updateProgressLabel: NSTextField = {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false; f.isSelectable = false
+        f.isBordered = false; f.drawsBackground = false
+        f.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        f.textColor = .secondaryLabelColor
+        f.alignment = .center
+        return f
+    }()
+    private var updateStatusGroup: NSStackView?
+    private var updateButtonRow: NSStackView?
+    private var updateProgressGroup: NSStackView?
+    private var pendingReleaseURL: URL?
+    private var pendingDownloadURL: URL?
+    private var pendingLatestVersion: String?
+    private var updateInstaller: UpdateInstaller?
 
     // MARK: - Controls
 
@@ -237,7 +320,7 @@ final class PreferencesWindowController: NSWindowController,
     private var isRecordingHotkey = false
 
     private let categoryTitles = ["General", "Audio", "Transcription", "Output",
-                                  "Advanced"]
+                                  "Advanced", "About"]
     private var categoryViews: [NSView] = []
     private let sidebarTable = NSTableView()
     private let contentContainer = NSView()
@@ -280,6 +363,18 @@ final class PreferencesWindowController: NSWindowController,
             if !window.isVisible { window.center() }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    func showAbout(startUpdateCheck: Bool = false) {
+        showPreferences()
+        if let index = categoryTitles.firstIndex(of: "About") {
+            sidebarTable.selectRowIndexes(IndexSet(integer: index),
+                                          byExtendingSelection: false)
+            showCategory(at: index)
+        }
+        if startUpdateCheck {
+            runUpdateCheck()
         }
     }
 
@@ -474,7 +569,8 @@ final class PreferencesWindowController: NSWindowController,
             buildAudioPane(),
             buildTranscriptionPane(),
             buildOutputPane(),
-            buildAdvancedPane()
+            buildAdvancedPane(),
+            buildAboutPane()
         ]
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Category"))
@@ -1417,6 +1513,278 @@ final class PreferencesWindowController: NSWindowController,
         let after4 = placeSection(reset, in: pane, below: after3, topConstant: gap)
         pane.bottomAnchor.constraint(greaterThanOrEqualTo: after4, constant: inset).isActive = true
         return pane
+    }
+
+    private func buildAboutPane() -> NSView {
+        let pane = FlippedView()
+        pane.translatesAutoresizingMaskIntoConstraints = false
+
+        let info = Bundle.main.infoDictionary
+        let version = (info?["PQDisplayVersion"] as? String) ?? "1.1"
+        let appIcon = NSApp.applicationIconImage ?? NSImage(named: "push-to-dictate")
+            ?? NSImage(size: NSSize(width: 128, height: 128))
+
+        let iconView = NSImageView()
+        iconView.image = appIcon
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+
+        let nameLabel = NSTextField(frame: .zero)
+        nameLabel.isEditable = false; nameLabel.isSelectable = false
+        nameLabel.isBordered = false; nameLabel.drawsBackground = false
+        nameLabel.stringValue = "Push to Dictate"
+        nameLabel.font = NSFont.boldSystemFont(ofSize: 20)
+        nameLabel.alignment = .center
+
+        let versionLabel = NSTextField(frame: .zero)
+        versionLabel.isEditable = false; versionLabel.isSelectable = false
+        versionLabel.isBordered = false; versionLabel.drawsBackground = false
+        versionLabel.stringValue = "Version \(version)"
+        versionLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        versionLabel.textColor = .secondaryLabelColor
+        versionLabel.alignment = .center
+
+        let authorLabel = NSTextField(frame: .zero)
+        authorLabel.isEditable = false; authorLabel.isSelectable = false
+        authorLabel.isBordered = false; authorLabel.drawsBackground = false
+        authorLabel.stringValue = "by Paradoxical Quad"
+        authorLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        authorLabel.alignment = .center
+
+        let description = NSTextField(frame: .zero)
+        description.isEditable = false; description.isSelectable = false
+        description.isBordered = false; description.drawsBackground = false
+        description.stringValue = "A menu-bar dictation app for conventional computers. "
+            + "Works offline. No hardware acceleration required."
+        description.lineBreakMode = .byWordWrapping
+        description.cell?.wraps = true
+        description.cell?.isScrollable = false
+        description.preferredMaxLayoutWidth = 360
+        description.alignment = .center
+        description.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+
+        let credits = NSTextField(frame: .zero)
+        credits.isEditable = false; credits.isSelectable = false
+        credits.isBordered = false; credits.drawsBackground = false
+        credits.stringValue = "Transcription uses Whisper, OpenAI's open-source speech "
+            + "recognition model, adapted by whisper.cpp to run on CPU instead of GPU."
+        credits.lineBreakMode = .byWordWrapping
+        credits.cell?.wraps = true
+        credits.cell?.isScrollable = false
+        credits.preferredMaxLayoutWidth = 360
+        credits.alignment = .center
+        credits.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        credits.textColor = .secondaryLabelColor
+
+        let copyright = NSTextField(frame: .zero)
+        copyright.isEditable = false; copyright.isSelectable = false
+        copyright.isBordered = false; copyright.drawsBackground = false
+        copyright.stringValue = "\u{00A9} 2026 Paradoxical Quad"
+        copyright.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        copyright.textColor = .secondaryLabelColor
+        copyright.alignment = .center
+
+        let spacer1 = NSView()
+        spacer1.translatesAutoresizingMaskIntoConstraints = false
+        spacer1.heightAnchor.constraint(equalToConstant: 8).isActive = true
+        let spacer2 = NSView()
+        spacer2.translatesAutoresizingMaskIntoConstraints = false
+        spacer2.heightAnchor.constraint(equalToConstant: 8).isActive = true
+        let spacer3 = NSView()
+        spacer3.translatesAutoresizingMaskIntoConstraints = false
+        spacer3.heightAnchor.constraint(equalToConstant: 8).isActive = true
+        let spacer4 = NSView()
+        spacer4.translatesAutoresizingMaskIntoConstraints = false
+        spacer4.heightAnchor.constraint(equalToConstant: 4).isActive = true
+
+        updateCheckButton.target = self
+        updateCheckButton.action = #selector(checkForUpdatesClicked)
+
+        updateDownloadButton.target = self
+        updateDownloadButton.action = #selector(downloadUpdateClicked)
+        updateOpenReleaseButton.target = self
+        updateOpenReleaseButton.action = #selector(openReleasesClicked)
+        updateSkipButton.target = self
+        updateSkipButton.action = #selector(skipUpdateClicked)
+
+        let statusRow = NSStackView(views: [updateSpinner, updateStatusLabel])
+        statusRow.orientation = .horizontal
+        statusRow.spacing = 8
+        statusRow.alignment = .centerY
+
+        let buttonRow = NSStackView(views: [updateDownloadButton,
+                                            updateOpenReleaseButton,
+                                            updateSkipButton])
+        buttonRow.orientation = .horizontal
+        buttonRow.spacing = 10
+
+        updateProgressBar.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        updateProgressBar.isHidden = true
+        updateProgressLabel.isHidden = true
+        let progressGroup = NSStackView(views: [updateProgressBar, updateProgressLabel])
+        progressGroup.orientation = .vertical
+        progressGroup.alignment = .centerX
+        progressGroup.spacing = 4
+        progressGroup.isHidden = true
+        self.updateProgressGroup = progressGroup
+
+        let statusGroup = NSStackView(views: [statusRow, updateDetailLabel,
+                                              buttonRow, progressGroup])
+        statusGroup.orientation = .vertical
+        statusGroup.alignment = .centerX
+        statusGroup.spacing = 8
+        statusGroup.isHidden = true
+        self.updateStatusGroup = statusGroup
+        self.updateButtonRow = buttonRow
+
+        let stack = NSStackView(views: [
+            iconView,
+            spacer1,
+            nameLabel, versionLabel, authorLabel,
+            spacer2,
+            description,
+            spacer3,
+            credits, copyright,
+            spacer4,
+            updateCheckButton,
+            statusGroup
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(stack)
+
+        let inset = PreferencesWindowController.paneInset
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: pane.topAnchor, constant: inset + 8),
+            stack.centerXAnchor.constraint(equalTo: pane.centerXAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 128),
+            iconView.heightAnchor.constraint(equalToConstant: 128),
+            description.widthAnchor.constraint(equalToConstant: 360),
+            credits.widthAnchor.constraint(equalToConstant: 360),
+            updateDetailLabel.widthAnchor.constraint(equalToConstant: 360),
+            pane.bottomAnchor.constraint(greaterThanOrEqualTo: stack.bottomAnchor,
+                                         constant: inset)
+        ])
+        return pane
+    }
+
+    // MARK: - Inline update check
+
+    func triggerUpdateCheck() {
+        runUpdateCheck()
+    }
+
+    @objc private func checkForUpdatesClicked() {
+        runUpdateCheck()
+    }
+
+    private func runUpdateCheck() {
+        pendingReleaseURL = nil
+        pendingDownloadURL = nil
+        pendingLatestVersion = nil
+        updateStatusLabel.stringValue = "Checking for updates\u{2026}"
+        updateDetailLabel.stringValue = ""
+        updateSpinner.isHidden = false
+        updateSpinner.startAnimation(nil)
+        updateDownloadButton.isHidden = true
+        updateOpenReleaseButton.isHidden = true
+        updateSkipButton.isHidden = true
+        updateButtonRow?.isHidden = true
+        updateProgressGroup?.isHidden = true
+        updateProgressBar.isHidden = true
+        updateProgressLabel.isHidden = true
+        updateProgressBar.doubleValue = 0
+        updateProgressLabel.stringValue = ""
+        updateStatusGroup?.isHidden = false
+        updateCheckButton.isEnabled = false
+
+        UpdateChecker.checkForUpdates { [weak self] result in
+            self?.renderUpdateResult(result)
+        }
+    }
+
+    private func renderUpdateResult(_ result: UpdateCheckResult) {
+        onUpdateCheckResult?(result)
+        updateSpinner.stopAnimation(nil)
+        updateSpinner.isHidden = true
+        updateCheckButton.isEnabled = true
+
+        switch result {
+        case .upToDate(let current):
+            updateStatusLabel.stringValue = "Up to date."
+            updateDetailLabel.stringValue = "Installed version: \(current)"
+            updateButtonRow?.isHidden = true
+
+        case .updateAvailable(let current, let latest, let url, let downloadURL):
+            pendingReleaseURL = url
+            pendingDownloadURL = downloadURL
+            pendingLatestVersion = latest
+            updateStatusLabel.stringValue = "Update available: \(latest)"
+            updateDetailLabel.stringValue = "Installed version: \(current)"
+            let canInstall = (downloadURL != nil) && UpdateInstaller.canInstallInPlace()
+            updateDownloadButton.isHidden = !canInstall
+            updateDownloadButton.isEnabled = canInstall
+            updateOpenReleaseButton.isHidden = false
+            updateSkipButton.isHidden = false
+            updateButtonRow?.isHidden = false
+
+        case .error(let message):
+            updateStatusLabel.stringValue = "Couldn't check for updates."
+            updateDetailLabel.stringValue = message
+            updateButtonRow?.isHidden = true
+        }
+    }
+
+    @objc private func downloadUpdateClicked() {
+        guard let url = pendingDownloadURL else { return }
+        updateDownloadButton.isEnabled = false
+        updateSkipButton.isEnabled = false
+        updateProgressGroup?.isHidden = false
+        updateProgressBar.isHidden = false
+        updateProgressLabel.isHidden = false
+        updateProgressBar.doubleValue = 0
+        updateProgressLabel.stringValue = "Starting\u{2026}"
+
+        let installer = UpdateInstaller(downloadURL: url)
+        updateInstaller = installer
+        installer.onStageChange = { [weak self] description in
+            DispatchQueue.main.async { self?.updateProgressLabel.stringValue = description }
+        }
+        installer.onProgress = { [weak self] fraction in
+            DispatchQueue.main.async { self?.updateProgressBar.doubleValue = fraction }
+        }
+        installer.onFailure = { [weak self] message in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.updateProgressLabel.stringValue = "Failed: \(message)"
+                self.updateProgressBar.doubleValue = 0
+                self.updateDownloadButton.isEnabled = false
+                self.updateSkipButton.isEnabled = true
+                self.updateInstaller = nil
+            }
+        }
+        installer.onReadyToRelaunch = {
+            DispatchQueue.main.async {
+                NSApp.terminate(nil)
+            }
+        }
+        installer.start()
+    }
+
+    @objc private func openReleasesClicked() {
+        if let url = pendingReleaseURL {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc private func skipUpdateClicked() {
+        if let latest = pendingLatestVersion {
+            onUpdateSkipped?(latest)
+        }
+        updateButtonRow?.isHidden = true
+        updateStatusLabel.stringValue = "Skipped version \(pendingLatestVersion ?? "")."
+        updateDetailLabel.stringValue = ""
     }
 
     // Wraps a row of controls with left padding so nested checkboxes read

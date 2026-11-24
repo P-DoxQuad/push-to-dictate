@@ -110,7 +110,7 @@ Release cutting:
 - Tag the release commit with the CalVer version prefixed with `v`.
 - Branch `release/vN.M` from that tag.
 - Push the tag and the branch to `origin`.
-- Build the Release archive from the tagged commit, zip as `Push-to-Dictate-v<CalVer>-Full.zip` (asset filename carries `-Full` to mark it as the complete bundle, reserving naming space for possible partial-asset variants like `-Patch`), attach to the existing `v<CalVer>` tag's new GitHub release.
+- Build the Release archive from the tagged commit, zip as `Push-to-Dictate-v<CalVer>-Full.zip` (asset filename carries `-Full` to distinguish it from GitHub's auto-generated source-code zips; the updater matches on this suffix), attach to the existing `v<CalVer>` tag's new GitHub release.
 - On `main`, immediately bump `CFBundleShortVersionString` to the next anticipated CalVer and `PQDisplayVersion` to the next SemVer so in-development builds identify as newer than the shipped release.
 
 Backport flow:

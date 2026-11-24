@@ -1356,7 +1356,7 @@ final class StatusItemController: NSObject,
     }
 
     @objc private func openAbout() {
-        AboutWindowController.shared.show()
+        presentAboutTab(startUpdateCheck: false)
     }
 
     @objc private func openHelp() {
@@ -1364,32 +1364,38 @@ final class StatusItemController: NSObject,
     }
 
     @objc private func checkForUpdates() {
-        UpdateCheckWindowController.present(
-            onResult: { [weak self] result in
-                guard let self = self else { return }
-                let skipped = Preferences.shared.skippedUpdateVersion
-                switch result {
-                case .updateAvailable(_, let latest, _):
-                    self.pendingUpdateVersion = (latest == skipped) ? nil : latest
-                case .upToDate:
-                    self.pendingUpdateVersion = nil
-                    if !skipped.isEmpty {
-                        Preferences.shared.skippedUpdateVersion = ""
-                    }
-                case .error:
-                    break
-                }
-                self.refreshUpdatesMenuItem()
-                self.refreshMenuBarIcon()
-            },
-            onSkip: { [weak self] latest in
-                guard let self = self else { return }
-                Preferences.shared.skippedUpdateVersion = latest
+        presentAboutTab(startUpdateCheck: true)
+    }
+
+    private func presentAboutTab(startUpdateCheck: Bool) {
+        let controller = PreferencesWindowController.shared
+        controller.onHotkeyChanged = { [weak self] in self?.applyHotkeySettings() }
+        controller.onColoredIconChanged = { [weak self] in self?.refreshMenuBarIcon() }
+        controller.onUpdateCheckResult = { [weak self] result in
+            guard let self = self else { return }
+            let skipped = Preferences.shared.skippedUpdateVersion
+            switch result {
+            case .updateAvailable(_, let latest, _, _):
+                self.pendingUpdateVersion = (latest == skipped) ? nil : latest
+            case .upToDate:
                 self.pendingUpdateVersion = nil
-                self.refreshUpdatesMenuItem()
-                self.refreshMenuBarIcon()
+                if !skipped.isEmpty {
+                    Preferences.shared.skippedUpdateVersion = ""
+                }
+            case .error:
+                break
             }
-        )
+            self.refreshUpdatesMenuItem()
+            self.refreshMenuBarIcon()
+        }
+        controller.onUpdateSkipped = { [weak self] latest in
+            guard let self = self else { return }
+            Preferences.shared.skippedUpdateVersion = latest
+            self.pendingUpdateVersion = nil
+            self.refreshUpdatesMenuItem()
+            self.refreshMenuBarIcon()
+        }
+        controller.showAbout(startUpdateCheck: startUpdateCheck)
     }
 
     private func refreshUpdatesMenuItem() {

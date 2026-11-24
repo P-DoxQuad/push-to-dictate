@@ -1279,3 +1279,21 @@ New Advanced tab section exposes the post-processing pipeline as six user-toggle
 Six new booleans in `Preferences.swift`, all defaulting to true, all registered in `allUserDefaultsKeys`. Pref storage keys (`transcriptProcessingEnabled`, `removeNonSpeechAnnotations`, `normalizeCapitalization`, `applyProperNounFixups`, `applyTextSubstitutions`, `capitalizeFirstLetterAtLineStart`) are internal and do not need to mirror UI label changes.
 
 UI: `updateTranscriptProcessingControls()` greys out the five nested checkboxes when the root is off (pref values preserved). New `makeIndentedRow(views:indent:)` helper visually indents the children 20pt beneath the root. Each checkbox has its own help popover using the existing `HelpButton` infrastructure. Deliberately independent of `continuousDictationStripWhisperPunctuation`, `continuousDictationAutoEndPeriod`, `continuousDictationPromptChainEnabled`, and the continuous-dictation master checkbox: none of those are affected by the five new passes.
+
+#### About tab, inline update check, and auto-install
+
+Three changes bundled.
+
+**About consolidated into Preferences.** `App/AboutWindowController.swift` deleted. The About pane is now the sixth tab of Preferences, built by `buildAboutPane()`. Menu-bar "About push-to-dictate" opens Preferences and preselects this tab via new `PreferencesWindowController.showAbout(startUpdateCheck:)`. Layout matches the previous standalone window: 128pt icon, name, version, author, description, credits, copyright, Check for Updates button.
+
+**Update check inline.** `App/UpdateCheckWindowController.swift` deleted. The spinner, status label, detail label, and action buttons (`Download & Install`, `Open Release Page`, `Skip This Update`) are embedded directly in the About pane, hidden until the user clicks Check for Updates. Menu-bar "Check for Updates…" now routes through `showAbout(startUpdateCheck: true)`, which opens the About tab and auto-fires the check. Result handlers moved to `PreferencesWindowController` with two new callbacks (`onUpdateCheckResult`, `onUpdateSkipped`); `StatusItemController.presentAboutTab` wires them to the existing badge-state logic.
+
+**Auto-install pipeline.** New `Core/UpdateInstaller.swift`. Five stages: download zip via `URLSession.downloadTask` (progress reported by delegate), extract via `/usr/bin/ditto -xk` into `~/Library/Caches/push-to-dictate/updates/stage-<uuid>/`, strip `com.apple.quarantine` via `xattr -dr`, swap via a detached `/tmp/push-to-dictate-updater-<pid>.sh` script that waits for the parent to exit then `rm -rf` + `mv` + `open`, relaunch via `NSApp.terminate(nil)`. Guard: `UpdateInstaller.canInstallInPlace()` returns true only when the running bundle lives directly under `/Applications/`; any other install path hides the Download button and falls back to Open Release Page.
+
+Asset selection: `UpdateChecker` now parses `assets[]` and picks the single entry ending `-Full.zip`. Zero or multiple matches return `nil`, which also hides the Download button. `UpdateCheckResult.updateAvailable` grew a fourth associated value `downloadURL: URL?`; all call sites updated.
+
+Progress UI: shared progress bar + label below the three action buttons. Bar and label are individually hidden (not just their containing stack) because 10.11 AppKit does not reliably propagate `isHidden` through nested `NSStackView` to subviews with active size constraints, which was leaking the empty bar behind the Up-to-date text on the first iteration.
+
+Not implemented yet: background check on launch, downloaded-bundle code-signature validation, download resume on interrupt, checksum verification. All deferred to future work.
+
+CLAUDE.md: removed the `-Patch` hedge from the release-asset section. `-Full` is now described as the suffix the updater matches on, distinguishing the build from GitHub's auto-generated source-code zips.
