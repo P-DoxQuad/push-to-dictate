@@ -46,7 +46,6 @@ final class Preferences {
         static let continuousDictationPromptChainMaxChars = "continuousDictationPromptChainMaxChars"
         static let continuousDictationStripWhisperPunctuation = "continuousDictationStripWhisperPunctuation"
         static let continuousDictationAutoEndPeriod = "continuousDictationAutoEndPeriod"
-        static let continuousDictationSentencePauseSeconds = "continuousDictationSentencePauseSeconds"
         static let continuousDictationSentencePauseMaxSeconds = "continuousDictationSentencePauseMaxSeconds"
         static let continuousDictationTrailingPeriodSeconds = "continuousDictationTrailingPeriodSeconds"
         static let transcriptProcessingEnabled = "transcriptProcessingEnabled"
@@ -208,7 +207,7 @@ final class Preferences {
     var continuousDictationPauseSeconds: Double {
         get {
             let stored = defaults.double(forKey: Key.continuousDictationPauseSeconds)
-            return stored == 0 ? 0.5 : stored
+            return stored == 0 ? 1.0 : stored
         }
         set { defaults.set(newValue, forKey: Key.continuousDictationPauseSeconds) }
     }
@@ -216,13 +215,21 @@ final class Preferences {
     var continuousDictationMaxChunkSeconds: Double {
         get {
             let stored = defaults.double(forKey: Key.continuousDictationMaxChunkSeconds)
-            return stored == 0 ? 30.0 : stored
+            return stored == 0 ? 5.0 : stored
         }
         set { defaults.set(newValue, forKey: Key.continuousDictationMaxChunkSeconds) }
     }
 
+    // Default 0.3 when unset. Uses `object(forKey:) == nil` instead of the
+    // `stored == 0` sentinel so users can explicitly disable overlap by
+    // setting 0 without bouncing back to the default on the next read.
     var continuousDictationChunkOverlapSeconds: Double {
-        get { return defaults.double(forKey: Key.continuousDictationChunkOverlapSeconds) }
+        get {
+            if defaults.object(forKey: Key.continuousDictationChunkOverlapSeconds) == nil {
+                return 0.3
+            }
+            return defaults.double(forKey: Key.continuousDictationChunkOverlapSeconds)
+        }
         set { defaults.set(newValue, forKey: Key.continuousDictationChunkOverlapSeconds) }
     }
 
@@ -250,10 +257,11 @@ final class Preferences {
     }
 
     // Strip-punctuation mode only. Governs the trailing-period timer
-    // that fires after prolonged silence (at 4 * sentencePauseSeconds)
-    // and appends a closing `.`. OFF leaves the final sentence unclosed.
-    // Mid-dictation sentence breaks (the `". "` + capital prefix inside
-    // the gap window) are driven by the gap-based rule in both modes.
+    // that fires after prolonged silence (configured by
+    // `continuousDictationTrailingPeriodSeconds`) and appends a
+    // closing `.`. OFF leaves the final sentence unclosed. Mid-dictation
+    // sentence breaks (the `". "` + capital prefix inside the gap
+    // window) are driven by the gap-based rule in both modes.
     var continuousDictationAutoEndPeriod: Bool {
         get {
             if defaults.object(forKey: Key.continuousDictationAutoEndPeriod) == nil {
@@ -264,26 +272,16 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.continuousDictationAutoEndPeriod) }
     }
 
-    // Strip-punctuation mode. The master timing knob (`P`). New-sentence
-    // window opens when a chunk's preceding gap is >= this value.
-    // Editing this in the UI cascades the max / trailing fields
-    // proportionally so the user-set ratio between them is preserved.
-    var continuousDictationSentencePauseSeconds: Double {
-        get {
-            let stored = defaults.double(forKey: Key.continuousDictationSentencePauseSeconds)
-            return stored == 0 ? 1.0 : stored
-        }
-        set { defaults.set(newValue, forKey: Key.continuousDictationSentencePauseSeconds) }
-    }
-
     // Strip-punctuation mode. The new-sentence window closes at this
     // value; gaps longer than this fall into the "dead zone" where a
     // resuming chunk gets `" "` continuation instead of `". "` + capital.
-    // Default 2.0 (2x the sentence-pause default). Independently editable.
+    // Floor of the window is `continuousDictationPauseSeconds` (same knob
+    // that decides when a chunk emits); must stay at least 1.0 above it.
+    // Default 2.5.
     var continuousDictationSentencePauseMaxSeconds: Double {
         get {
             let stored = defaults.double(forKey: Key.continuousDictationSentencePauseMaxSeconds)
-            return stored == 0 ? 2.0 : stored
+            return stored == 0 ? 2.5 : stored
         }
         set { defaults.set(newValue, forKey: Key.continuousDictationSentencePauseMaxSeconds) }
     }
@@ -653,7 +651,6 @@ final class Preferences {
         Key.continuousDictationPromptChainMaxChars,
         Key.continuousDictationStripWhisperPunctuation,
         Key.continuousDictationAutoEndPeriod,
-        Key.continuousDictationSentencePauseSeconds,
         Key.continuousDictationSentencePauseMaxSeconds,
         Key.continuousDictationTrailingPeriodSeconds,
         Key.transcriptProcessingEnabled,

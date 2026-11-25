@@ -1362,3 +1362,59 @@ Purpose: when a chunk boundary produces a weird transcription (hallucinated word
 `AudioRecorder.writeDebugWav` refactored: its WAV-writing core was pulled out into `static writeSamplesAsWav(samples:to:)` so `StatusItemController` can write per-chunk WAVs without duplicating AVAudioFile setup. Session-end full capture still uses the same path. No format change (16 kHz mono 16-bit PCM).
 
 `Clear Debug Recordings…` button now counts WAVs across both the top-level folder and all `session-*` subfolders, and deletes session folders entirely (which also removes their sidecar `.txt` files). Backward-compatible with the previous flat layout.
+
+#### Merge: Pause absorbs Sentence pause
+
+The `continuousDictationSentencePauseSeconds` preference ("Sentence pause") was removed. `continuousDictationPauseSeconds` ("Pause") now plays its role as the new-sentence window floor. Timing model becomes:
+
+- Silence < Pause: no chunk emits, user's speech stays in the current chunk.
+- Silence >= Pause: chunk emits. If the gap to the next chunk's first speech is in `[Pause, Window threshold]`, the next chunk gets `". "` + capital. Beyond Window threshold, the next chunk is treated as a fresh restart.
+
+Rationale: the old `[Pause, Sentence pause)` continuation band was a 0.1s-to-0.5s micro-window that essentially never matched how humans actually pause. Real mid-sentence breaths land below Pause (and are already handled implicitly by chunk accumulation). Real sentence breaks land above Sentence pause. The intermediate band was storage for "I paused exactly at the chunk boundary but was going to keep going," a scenario rare enough that collapsing it costs nothing.
+
+Removed:
+
+- `Key.continuousDictationSentencePauseSeconds`, its getter/setter, and its entry in `allUserDefaultsKeys`.
+- `continuousSentencePauseField` / `continuousSentencePauseStepper` / `continuousSentencePauseLabel` in `PreferencesWindowController`.
+- The "Sentence pause:" row from the Transcription Behavior section.
+- `applyCascadingSentencePause(_:)` (the proportional cascade). Replaced by a smaller `bumpDependentsIfNeededAfterPauseChange` helper: when Pause changes, if Window threshold is now <= Pause it's nudged to `Pause + 0.1`, and Trailing period follows the same rule against Window threshold. Keeps the three remaining timing knobs monotonic without aggressive scaling.
+
+Changed:
+
+- `StatusItemController.handleContinuousResult` gap check: `gap >= continuousDictationSentencePauseSeconds` → `gap >= continuousDictationPauseSeconds`.
+- `continuousSentencePauseMaxField` (Window threshold) validator floor: now `continuousDictationPauseSeconds + 0.1` instead of the sentence-pause value. Same for its stepper clamp.
+- Pause help text now mentions its dual role as chunk-emit threshold and sentence-break floor.
+- Window threshold help text references the Pause floor instead of Sentence pause.
+
+Backward compat: the deleted UserDefaults key is harmless if present in a backup restore; nothing reads it anymore.
+
+#### Default retune: sentence pause, window threshold, max chunk, chunk overlap
+
+Updated continuous-dictation defaults based on hands-on experimentation on the merged timing model.
+
+- Sentence pause: 0.5 → **1.0** seconds.
+- Window threshold: 2.0 → **2.5** seconds. Floor constraint tightened from `> Sentence pause` to **`>= Sentence pause + 1.0`**.
+- Max chunk: 30 → **5** seconds. Range widened: 5-30 → **5-50**.
+- Chunk overlap: 0.0 → **0.3** seconds. Range unchanged (0-1.5). Default moved from `stored == 0 ? 0.0 : stored` to an `object(forKey:) == nil` sentinel so users can still explicitly disable overlap by setting 0.
+- Trailing period floor against Window threshold: was `> Window threshold` → now **`>= Window threshold + 0.5`**.
+
+Rationale:
+
+- The 1.0s Sentence pause default is calibrated for conversational dictation rhythms. Default 0.5 was too aggressive post-merge (every half-second breath started a new sentence).
+- Larger Sentence pause → Window threshold gap (1.0 instead of 0.1) prevents the two knobs from being set so close that a tiny gap window produces unpredictable behavior. Users can still open the window as wide as they want; they just can't close it below 1 second.
+- Max chunk default of 5s combined with Chunk overlap of 0.3 is what works well in practice: text appears quickly, boundary artifacts are smoothed by the overlap, and the max of 50s gives users with slower-paced speech a wide ceiling.
+- Trailing period >= Window threshold + 0.5 is enforced symmetrically with the Sentence pause / Window threshold rule, same validator + stepper + auto-bump pattern. The 0.5 gap is tighter than the 1.0 above it because the user-visible consequence (eventual trailing period after prolonged silence) is less sensitive to the exact boundary.
+
+Enforcement in `PreferencesWindowController`:
+
+- Validators (both typed-field commit and `numericFieldIsValid`) use `>= minVal`, not `> minVal`, so the enforced minimum is exactly `Sentence pause + 1.0` (not `+ 1.0 + epsilon`).
+- Steppers clamp their raw `doubleValue` with `max(minVal, min(ceiling, raw))`.
+- `bumpDependentsIfNeededAfterPauseChange` triggers if either dependent would drop below its minimum gap after a Sentence pause edit. Fires only when needed; never pushes dependents down.
+
+Hint strings and help-popover examples updated to match the new defaults.
+
+#### Minor UI polish on continuous dictation prefs
+
+- "Pause" label renamed to "Sentence pause". Describes what the setting produces (sentence boundary) rather than what the user does (pausing). Internal pref key (`continuousDictationPauseSeconds`) unchanged to avoid stranding existing values.
+- Help button added to the Backend popup in Transcription. Describes what each backend is: whisper.cpp runs locally (audio stays on the Mac, offline, no ongoing cost); OpenAI API runs on OpenAI's servers (audio sent over the internet, API key required, billed per minute). No comparative language.
+- Rows in Transcription Behavior reordered: Sentence pause and Window threshold are now adjacent, followed by Max chunk and Chunk overlap. The sentence-boundary pair come first; the chunk-management pair follow.

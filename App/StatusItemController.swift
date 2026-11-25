@@ -1080,10 +1080,12 @@ final class StatusItemController: NSObject,
                         // coexist regardless of auto-end-period state:
                         //
                         // Gap-based: chunk arriving with gap in the
-                        // new-sentence window [P, 2P] where P =
-                        // sentencePauseSeconds. Prefix is `". "` +
-                        // capital. Outside the window (gap < P or gap
-                        // > 2P) is just `" "` continuation.
+                        // new-sentence window [P, W] where P =
+                        // pauseSeconds and W = sentencePauseMaxSeconds
+                        // (Window threshold in the UI). Prefix is `". "` +
+                        // capital. Beyond W, a resuming chunk gets `" "`
+                        // continuation. Below P no chunk emits at all,
+                        // so there's no sub-P case to handle here.
                         //
                         // Trailing-period timer: when auto-end-period is
                         // ON, a timer fires after 4P of silence from
@@ -1098,7 +1100,7 @@ final class StatusItemController: NSObject,
                         // through to the normal logic in that case.
                         let atLineStart = CursorContext.isCursorAtLineStart()
                         let gapIsSentenceBreak =
-                            gap >= prefs.continuousDictationSentencePauseSeconds
+                            gap >= prefs.continuousDictationPauseSeconds
                             && gap <= prefs.continuousDictationSentencePauseMaxSeconds
                         if isFirstContinuousChunk {
                             prefix = ""

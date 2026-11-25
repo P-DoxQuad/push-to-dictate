@@ -2,6 +2,23 @@
 
 Directives for working on this repo. Scope, and work history, are in `DEVLOG.md`, and `README.md`. `claude.local.md` has secrets only you need to know
 
+## Clear and concise
+
+Applies to every output surface: chat replies, UI strings, help popovers, code comments, documentation, commit messages. Overrides any writing instinct that conflicts.
+
+- State what a thing is. Do not editorialize about it.
+- No comparative language. Not "faster", "more accurate", "better", "cleaner", "simpler".
+- No recommendations. Not "start with X", "if you're not sure, Y", "we suggest Z".
+- No selling points. Not "for the extra accuracy", "to catch the current topic", "so you don't wait forever".
+- No value judgments. Describe tradeoffs as facts, not as better or worse.
+- No narrative framing. Not "the industry moved", "historically", "this used to be a problem".
+
+**Clear** = unambiguous. Each sentence says one thing. Plain words. Does not require the reader to infer intent.
+
+**Concise** = no words that aren't carrying information. A sentence whose removal doesn't change what the reader knows should not exist. Shorter is not the goal; unnecessary is the failure.
+
+Before shipping any text (commit message, help popover, chat answer, code comment, docs entry): scan each sentence and ask "does its removal change what the reader knows?" If no, delete it.
+
 ## Writing style
 
 Applies to all project docs (CLAUDE.md, README.md, DEVLOG.md, THIRD_PARTY_NOTICES.md, in-repo notes, commit messages). Applies to any new documentation added later.

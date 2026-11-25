@@ -255,8 +255,6 @@ final class PreferencesWindowController: NSWindowController,
         b.title = "Auto trailing period"
         return b
     }()
-    private let continuousSentencePauseField = NSTextField()
-    private let continuousSentencePauseStepper = NSStepper()
     private let continuousSentencePauseMaxField = NSTextField()
     private let continuousSentencePauseMaxStepper = NSStepper()
     private let continuousTrailingPeriodField = NSTextField()
@@ -318,7 +316,6 @@ final class PreferencesWindowController: NSWindowController,
     private var continuousMaxChunkLabel: NSTextField?
     private var continuousChunkOverlapLabel: NSTextField?
     private var continuousPromptChainMaxCharsLabel: NSTextField?
-    private var continuousSentencePauseLabel: NSTextField?
     private var continuousSentencePauseMaxLabel: NSTextField?
     private var continuousTrailingPeriodLabel: NSTextField?
 
@@ -502,14 +499,6 @@ final class PreferencesWindowController: NSWindowController,
         capitalizeFirstLetterCheckbox.action = #selector(capitalizeFirstLetterChanged)
         filterDuplicatesCheckbox.target = self
         filterDuplicatesCheckbox.action = #selector(filterDuplicatesChanged)
-        continuousSentencePauseField.delegate = self
-        continuousSentencePauseStepper.minValue = 0.1
-        continuousSentencePauseStepper.maxValue = 5.0
-        continuousSentencePauseStepper.increment = 0.1
-        continuousSentencePauseStepper.valueWraps = false
-        continuousSentencePauseStepper.target = self
-        continuousSentencePauseStepper.action = #selector(continuousSentencePauseStepperChanged)
-
         continuousSentencePauseMaxField.delegate = self
         continuousSentencePauseMaxStepper.minValue = 0.2
         continuousSentencePauseMaxStepper.maxValue = 10.0
@@ -556,7 +545,7 @@ final class PreferencesWindowController: NSWindowController,
         continuousPauseStepper.action = #selector(continuousPauseStepperChanged)
 
         continuousMaxChunkStepper.minValue = 5.0
-        continuousMaxChunkStepper.maxValue = 30.0
+        continuousMaxChunkStepper.maxValue = 50.0
         continuousMaxChunkStepper.increment = 0.5
         continuousMaxChunkStepper.valueWraps = false
         continuousMaxChunkStepper.target = self
@@ -992,12 +981,20 @@ final class PreferencesWindowController: NSWindowController,
 
         let lw = PreferencesWindowController.widestLabelWidth(
             ["Backend:", "Local model:", "OpenAI API key:", "Location:",
-             "Pause:", "Max chunk:", "Chunk overlap:",
-             "Sentence pause:", "Window threshold:",
+             "Sentence pause:", "Max chunk:", "Chunk overlap:",
+             "Window threshold:",
              "Max chars:"])
 
+        let backendHelp = HelpButton(text:
+            "whisper.cpp (local): runs on your Mac. Audio stays on " +
+            "this computer. Works offline. No ongoing cost.\n\n" +
+            "OpenAI API: runs on OpenAI's servers. Audio is sent over " +
+            "the internet. Requires an API key. Billed per minute.")
+        let backendControl = NSStackView(views: [backendPopup, backendHelp])
+        backendControl.orientation = .horizontal
+        backendControl.spacing = 8
         let backendRow = buildRowView(labelText: "Backend:",
-                                      control: backendPopup, labelWidth: lw)
+                                      control: backendControl, labelWidth: lw)
         let modelControl = NSStackView(views: [modelPopup, manageModelsButton])
         modelControl.orientation = .horizontal
         modelControl.spacing = 8
@@ -1044,36 +1041,41 @@ final class PreferencesWindowController: NSWindowController,
 
         continuousPauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let pauseHint = PreferencesWindowController.makeHint(
-            "seconds · default 0.5")
+            "seconds · default 1.0")
         let pauseHelp = HelpButton(text:
-            "How long you need to pause before the app decides a chunk " +
-            "of speech is done and sends it off to be transcribed.\n\n" +
-            "Shorter = text appears faster but risks chopping sentences " +
-            "in half at natural mid-sentence pauses. Longer = text takes " +
-            "longer to show up but phrases stay intact.\n\n" +
-            "Example: with 0.5 seconds, a quick breath between words " +
-            "stays part of the same chunk, but a clear pause between " +
-            "two phrases produces a new chunk.")
+            "How long you need to pause before the app sends what you " +
+            "just said off to be transcribed. A pause this long or " +
+            "longer also counts as the end of a sentence, so the next " +
+            "thing you say gets a period and a capital letter in front " +
+            "of it.\n\n" +
+            "Shorter = text shows up sooner, but short mid-thought " +
+            "breaths are more likely to get treated as sentence endings. " +
+            "Longer = text takes longer to appear, and you can pause " +
+            "briefly without it starting a new sentence.\n\n" +
+            "Example: with 1.0 second, a quick breath between words " +
+            "stays part of the same thought; pausing a full second " +
+            "between phrases starts a new sentence.")
         let pauseControl = NSStackView(views: [
             continuousPauseField, continuousPauseStepper, pauseHint, pauseHelp
         ])
         pauseControl.orientation = .horizontal
         pauseControl.spacing = 8
         let (pauseRow, pauseLabelRef) = buildLabeledRow(
-            labelText: "Pause:", control: pauseControl, labelWidth: lw)
+            labelText: "Sentence pause:", control: pauseControl, labelWidth: lw)
         continuousPauseLabel = pauseLabelRef
 
         continuousMaxChunkField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let maxChunkHint = PreferencesWindowController.makeHint(
-            "seconds · default 30.0 · 5-30")
+            "seconds · default 5.0 · 5-50")
         let maxChunkHelp = HelpButton(text:
             "Safety limit on chunk length. If you talk non-stop for " +
             "this long without pausing, the app forces a break anyway " +
             "and sends what it has to be transcribed.\n\n" +
             "Prevents the transcription engine from choking on a huge " +
             "audio clip, and keeps text appearing at a reasonable rate.\n\n" +
-            "Example: with 30 seconds, a long run-on sentence gets cut " +
-            "after half a minute so you don't wait forever to see it.")
+            "Example: with 5 seconds, a long run-on sentence gets cut " +
+            "every five seconds so text keeps flowing to the cursor " +
+            "instead of piling up.")
         let maxChunkControl = NSStackView(views: [
             continuousMaxChunkField, continuousMaxChunkStepper, maxChunkHint, maxChunkHelp
         ])
@@ -1085,7 +1087,7 @@ final class PreferencesWindowController: NSWindowController,
 
         continuousChunkOverlapField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let chunkOverlapHint = PreferencesWindowController.makeHint(
-            "seconds · default 0.0 · 0-1.5")
+            "seconds · default 0.3 · 0-1.5")
         let chunkOverlapHelp = HelpButton(text:
             "When Max chunk forces a cut in the middle of your speech, " +
             "keeps the last fraction of a second of audio and feeds it " +
@@ -1108,44 +1110,23 @@ final class PreferencesWindowController: NSWindowController,
             labelText: "Chunk overlap:", control: chunkOverlapControl, labelWidth: lw)
         continuousChunkOverlapLabel = chunkOverlapLabelRef
 
-        continuousSentencePauseField.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let sentencePauseHelp = HelpButton(text:
-            "How long a pause between two chunks must be before the app " +
-            "treats it as the end of a sentence.\n\n" +
-            "Shorter pauses are treated as continuations of the same " +
-            "sentence (no period, no capital letter). Pauses this long " +
-            "or longer get a period and a capital on the next chunk.\n\n" +
-            "Example: with 1.0 second, a quick half-second pause between " +
-            "phrases stays one sentence; pausing a full second signals " +
-            "\"start a new thought.\"")
-        let sentencePauseControl = NSStackView(views: [
-            continuousSentencePauseField,
-            continuousSentencePauseStepper,
-            PreferencesWindowController.makeHint("seconds · default 1.0"),
-            sentencePauseHelp
-        ])
-        sentencePauseControl.orientation = .horizontal
-        sentencePauseControl.spacing = 8
-        let (sentencePauseRow, sentencePauseLabelRef) = buildLabeledRow(
-            labelText: "Sentence pause:", control: sentencePauseControl, labelWidth: lw)
-        continuousSentencePauseLabel = sentencePauseLabelRef
-
         continuousSentencePauseMaxField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let windowThresholdHelp = HelpButton(text:
-            "The upper limit on the sentence-break window. Pauses longer " +
-            "than this are treated as \"user got distracted\" rather than " +
-            "a sentence break.\n\n" +
-            "Between the Sentence pause value and this one, the next " +
-            "chunk is joined with a period. Beyond this, the next chunk " +
-            "is treated as a fresh restart with no join, no period.\n\n" +
-            "Example: with Sentence pause 1.0 and Window threshold 2.0, " +
-            "pausing 1 to 2 seconds means \"new sentence,\" but pausing " +
-            "more than 2 seconds means \"something else happened, just " +
-            "continue cleanly.\"")
+            "How long a pause can be before the app treats it as \"you " +
+            "got distracted or stepped away\" rather than the end of a " +
+            "sentence.\n\n" +
+            "Pauses shorter than this but at least as long as Sentence " +
+            "pause start a new sentence (period and capital letter on " +
+            "the next thing you say). Pauses longer than this skip the " +
+            "period and capital, and the next thing you say just " +
+            "continues cleanly as if you were starting fresh.\n\n" +
+            "Example: with Sentence pause 1.0 and this set to 2.5, " +
+            "pausing 1 to 2.5 seconds starts a new sentence; pausing " +
+            "longer than 2.5 seconds continues without adding a period.")
         let sentencePauseMaxControl = NSStackView(views: [
             continuousSentencePauseMaxField,
             continuousSentencePauseMaxStepper,
-            PreferencesWindowController.makeHint("seconds · default 2.0"),
+            PreferencesWindowController.makeHint("seconds · default 2.5"),
             windowThresholdHelp
         ])
         sentencePauseMaxControl.orientation = .horizontal
@@ -1219,9 +1200,9 @@ final class PreferencesWindowController: NSWindowController,
         promptChainRow.alignment = .centerY
 
         let behavior = buildSection(title: "Behavior",
-                                    rows: [continuousStack, pauseRow, maxChunkRow,
-                                           chunkOverlapRow,
-                                           sentencePauseRow, sentencePauseMaxRow,
+                                    rows: [continuousStack,
+                                           pauseRow, sentencePauseMaxRow,
+                                           maxChunkRow, chunkOverlapRow,
                                            stripRow,
                                            promptChainRow, promptCharsRow])
 
@@ -1963,10 +1944,6 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.continuousDictationStripWhisperPunctuation ? .on : .off
         autoEndPeriodCheckbox.state =
             Preferences.shared.continuousDictationAutoEndPeriod ? .on : .off
-        continuousSentencePauseField.stringValue = String(format: "%.1f",
-            Preferences.shared.continuousDictationSentencePauseSeconds)
-        continuousSentencePauseStepper.doubleValue =
-            Preferences.shared.continuousDictationSentencePauseSeconds
         continuousSentencePauseMaxField.stringValue = String(format: "%.1f",
             Preferences.shared.continuousDictationSentencePauseMaxSeconds)
         continuousSentencePauseMaxStepper.doubleValue =
@@ -2134,8 +2111,6 @@ final class PreferencesWindowController: NSWindowController,
         continuousMaxChunkStepper.isEnabled = enabled
         continuousChunkOverlapField.isEnabled = enabled
         continuousChunkOverlapStepper.isEnabled = enabled
-        continuousSentencePauseField.isEnabled = enabled
-        continuousSentencePauseStepper.isEnabled = enabled
         continuousSentencePauseMaxField.isEnabled = enabled
         continuousSentencePauseMaxStepper.isEnabled = enabled
         stripWhisperPunctuationCheckbox.isEnabled = enabled
@@ -2152,7 +2127,6 @@ final class PreferencesWindowController: NSWindowController,
         continuousPauseLabel?.textColor = labelActive
         continuousMaxChunkLabel?.textColor = labelActive
         continuousChunkOverlapLabel?.textColor = labelActive
-        continuousSentencePauseLabel?.textColor = labelActive
         continuousSentencePauseMaxLabel?.textColor = labelActive
         continuousPromptChainMaxCharsLabel?.textColor = promptCharsLabelActive
         continuousTrailingPeriodLabel?.textColor = trailingPeriodLabelActive
@@ -2378,6 +2352,7 @@ final class PreferencesWindowController: NSWindowController,
         Preferences.shared.continuousDictationPauseSeconds = value
         setNumericFieldValid(field: continuousPauseField,
                              label: continuousPauseLabel, valid: true)
+        bumpDependentsIfNeededAfterPauseChange()
     }
 
     @objc private func continuousMaxChunkStepperChanged() {
@@ -2404,15 +2379,8 @@ final class PreferencesWindowController: NSWindowController,
                              label: continuousPromptChainMaxCharsLabel, valid: true)
     }
 
-    @objc private func continuousSentencePauseStepperChanged() {
-        let chunkPause = Preferences.shared.continuousDictationPauseSeconds
-        let raw = continuousSentencePauseStepper.doubleValue
-        let clamped = max(chunkPause + 0.1, min(5.0, raw))
-        applyCascadingSentencePause(clamped)
-    }
-
     @objc private func continuousSentencePauseMaxStepperChanged() {
-        let minVal = Preferences.shared.continuousDictationSentencePauseSeconds + 0.1
+        let minVal = Preferences.shared.continuousDictationPauseSeconds + 1.0
         let raw = continuousSentencePauseMaxStepper.doubleValue
         let clamped = max(minVal, min(10.0, raw))
         continuousSentencePauseMaxField.stringValue = String(format: "%.1f", clamped)
@@ -2422,7 +2390,7 @@ final class PreferencesWindowController: NSWindowController,
     }
 
     @objc private func continuousTrailingPeriodStepperChanged() {
-        let minVal = Preferences.shared.continuousDictationSentencePauseMaxSeconds + 0.1
+        let minVal = Preferences.shared.continuousDictationSentencePauseMaxSeconds + 0.5
         let raw = continuousTrailingPeriodStepper.doubleValue
         let clamped = max(minVal, min(20.0, raw))
         continuousTrailingPeriodField.stringValue = String(format: "%.1f", clamped)
@@ -2431,34 +2399,33 @@ final class PreferencesWindowController: NSWindowController,
                              label: continuousTrailingPeriodLabel, valid: true)
     }
 
-    // Cascade an edit to the Sentence pause field through to Window close
-    // and Trailing period, preserving each dependent's current ratio to
-    // the old sentence-pause value. Call this whenever the sentence-pause
-    // field or stepper validates to a new value.
-    private func applyCascadingSentencePause(_ newP: Double) {
+    // After Sentence pause changes, nudge Window threshold (and
+    // transitively Trailing period) up to maintain the minimum gaps:
+    // Window threshold must be >= Sentence pause + 1.0, and Trailing
+    // period must be >= Window threshold + 0.5. Users can set either
+    // higher by hand; this only intervenes when they'd drop below the
+    // gap floor.
+    private func bumpDependentsIfNeededAfterPauseChange() {
         let prefs = Preferences.shared
-        let oldP = prefs.continuousDictationSentencePauseSeconds
-        continuousSentencePauseField.stringValue = String(format: "%.1f", newP)
-        continuousSentencePauseStepper.doubleValue = newP
-        prefs.continuousDictationSentencePauseSeconds = newP
-        setNumericFieldValid(field: continuousSentencePauseField,
-                             label: continuousSentencePauseLabel, valid: true)
-        guard oldP > 0 else { return }
-        let scale = newP / oldP
-        let newMax = min(10.0, max(newP + 0.1,
-                                   prefs.continuousDictationSentencePauseMaxSeconds * scale))
-        let newTrail = min(20.0, max(newMax + 0.1,
-                                     prefs.continuousDictationTrailingPeriodSeconds * scale))
-        prefs.continuousDictationSentencePauseMaxSeconds = newMax
-        prefs.continuousDictationTrailingPeriodSeconds = newTrail
-        continuousSentencePauseMaxField.stringValue = String(format: "%.1f", newMax)
-        continuousSentencePauseMaxStepper.doubleValue = newMax
-        continuousTrailingPeriodField.stringValue = String(format: "%.1f", newTrail)
-        continuousTrailingPeriodStepper.doubleValue = newTrail
-        setNumericFieldValid(field: continuousSentencePauseMaxField,
-                             label: continuousSentencePauseMaxLabel, valid: true)
-        setNumericFieldValid(field: continuousTrailingPeriodField,
-                             label: continuousTrailingPeriodLabel, valid: true)
+        let p = prefs.continuousDictationPauseSeconds
+        var w = prefs.continuousDictationSentencePauseMaxSeconds
+        if w < p + 1.0 {
+            w = min(10.0, p + 1.0)
+            prefs.continuousDictationSentencePauseMaxSeconds = w
+            continuousSentencePauseMaxField.stringValue = String(format: "%.1f", w)
+            continuousSentencePauseMaxStepper.doubleValue = w
+            setNumericFieldValid(field: continuousSentencePauseMaxField,
+                                 label: continuousSentencePauseMaxLabel, valid: true)
+        }
+        var t = prefs.continuousDictationTrailingPeriodSeconds
+        if t < w + 0.5 {
+            t = min(20.0, w + 0.5)
+            prefs.continuousDictationTrailingPeriodSeconds = t
+            continuousTrailingPeriodField.stringValue = String(format: "%.1f", t)
+            continuousTrailingPeriodStepper.doubleValue = t
+            setNumericFieldValid(field: continuousTrailingPeriodField,
+                                 label: continuousTrailingPeriodLabel, valid: true)
+        }
     }
 
     @objc private func saveDebugRecordingsChanged() {
@@ -2721,7 +2688,6 @@ final class PreferencesWindowController: NSWindowController,
         case continuousMaxChunkField: label = continuousMaxChunkLabel
         case continuousChunkOverlapField: label = continuousChunkOverlapLabel
         case continuousPromptChainMaxCharsField: label = continuousPromptChainMaxCharsLabel
-        case continuousSentencePauseField: label = continuousSentencePauseLabel
         case continuousSentencePauseMaxField: label = continuousSentencePauseMaxLabel
         case continuousTrailingPeriodField: label = continuousTrailingPeriodLabel
         default: return
@@ -2782,12 +2748,13 @@ final class PreferencesWindowController: NSWindowController,
                 Preferences.shared.continuousDictationPauseSeconds = v
                 setNumericFieldValid(field: continuousPauseField,
                                      label: continuousPauseLabel, valid: true)
+                bumpDependentsIfNeededAfterPauseChange()
             } else {
                 setNumericFieldValid(field: continuousPauseField,
                                      label: continuousPauseLabel, valid: false)
             }
         case continuousMaxChunkField:
-            if let v = Double(continuousMaxChunkField.stringValue), v >= 5.0, v <= 30.0 {
+            if let v = Double(continuousMaxChunkField.stringValue), v >= 5.0, v <= 50.0 {
                 continuousMaxChunkStepper.doubleValue = v
                 Preferences.shared.continuousDictationMaxChunkSeconds = v
                 setNumericFieldValid(field: continuousMaxChunkField,
@@ -2818,19 +2785,10 @@ final class PreferencesWindowController: NSWindowController,
                 setNumericFieldValid(field: continuousPromptChainMaxCharsField,
                                      label: continuousPromptChainMaxCharsLabel, valid: false)
             }
-        case continuousSentencePauseField:
-            let chunkPause = Preferences.shared.continuousDictationPauseSeconds
-            if let v = Double(continuousSentencePauseField.stringValue),
-               v > chunkPause, v <= 5.0 {
-                applyCascadingSentencePause(v)
-            } else {
-                setNumericFieldValid(field: continuousSentencePauseField,
-                                     label: continuousSentencePauseLabel, valid: false)
-            }
         case continuousSentencePauseMaxField:
-            let minVal = Preferences.shared.continuousDictationSentencePauseSeconds
+            let minVal = Preferences.shared.continuousDictationPauseSeconds + 1.0
             if let v = Double(continuousSentencePauseMaxField.stringValue),
-               v > minVal, v <= 10.0 {
+               v >= minVal, v <= 10.0 {
                 Preferences.shared.continuousDictationSentencePauseMaxSeconds = v
                 continuousSentencePauseMaxStepper.doubleValue = v
                 setNumericFieldValid(field: continuousSentencePauseMaxField,
@@ -2840,9 +2798,9 @@ final class PreferencesWindowController: NSWindowController,
                                      label: continuousSentencePauseMaxLabel, valid: false)
             }
         case continuousTrailingPeriodField:
-            let minVal = Preferences.shared.continuousDictationSentencePauseMaxSeconds
+            let minVal = Preferences.shared.continuousDictationSentencePauseMaxSeconds + 0.5
             if let v = Double(continuousTrailingPeriodField.stringValue),
-               v > minVal, v <= 20.0 {
+               v >= minVal, v <= 20.0 {
                 Preferences.shared.continuousDictationTrailingPeriodSeconds = v
                 continuousTrailingPeriodStepper.doubleValue = v
                 setNumericFieldValid(field: continuousTrailingPeriodField,
@@ -2879,25 +2837,21 @@ final class PreferencesWindowController: NSWindowController,
             return v >= 0.3 && v <= 2.0
         case continuousMaxChunkField:
             guard let v = Double(continuousMaxChunkField.stringValue) else { return false }
-            return v >= 5.0 && v <= 30.0
+            return v >= 5.0 && v <= 50.0
         case continuousChunkOverlapField:
             guard let v = Double(continuousChunkOverlapField.stringValue) else { return false }
             return v >= 0.0 && v <= 1.5
         case continuousPromptChainMaxCharsField:
             guard let v = Int(continuousPromptChainMaxCharsField.stringValue) else { return false }
             return v >= 100 && v <= 900
-        case continuousSentencePauseField:
-            let chunkPause = Preferences.shared.continuousDictationPauseSeconds
-            guard let v = Double(continuousSentencePauseField.stringValue) else { return false }
-            return v > chunkPause && v <= 5.0
         case continuousSentencePauseMaxField:
-            let minVal = Preferences.shared.continuousDictationSentencePauseSeconds
+            let minVal = Preferences.shared.continuousDictationPauseSeconds + 1.0
             guard let v = Double(continuousSentencePauseMaxField.stringValue) else { return false }
-            return v > minVal && v <= 10.0
+            return v >= minVal && v <= 10.0
         case continuousTrailingPeriodField:
-            let minVal = Preferences.shared.continuousDictationSentencePauseMaxSeconds
+            let minVal = Preferences.shared.continuousDictationSentencePauseMaxSeconds + 0.5
             guard let v = Double(continuousTrailingPeriodField.stringValue) else { return false }
-            return v > minVal && v <= 20.0
+            return v >= minVal && v <= 20.0
         default:
             return true
         }
@@ -2962,13 +2916,6 @@ final class PreferencesWindowController: NSWindowController,
                 Preferences.shared.continuousDictationPromptChainMaxChars
             setNumericFieldValid(field: continuousPromptChainMaxCharsField,
                                  label: continuousPromptChainMaxCharsLabel, valid: true)
-        case continuousSentencePauseField:
-            continuousSentencePauseField.stringValue = String(format: "%.1f",
-                Preferences.shared.continuousDictationSentencePauseSeconds)
-            continuousSentencePauseStepper.doubleValue =
-                Preferences.shared.continuousDictationSentencePauseSeconds
-            setNumericFieldValid(field: continuousSentencePauseField,
-                                 label: continuousSentencePauseLabel, valid: true)
         case continuousSentencePauseMaxField:
             continuousSentencePauseMaxField.stringValue = String(format: "%.1f",
                 Preferences.shared.continuousDictationSentencePauseMaxSeconds)
