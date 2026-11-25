@@ -41,8 +41,20 @@ final class Preferences {
         static let continuousDictationEnabled = "continuousDictationEnabled"
         static let continuousDictationPauseSeconds = "continuousDictationPauseSeconds"
         static let continuousDictationMaxChunkSeconds = "continuousDictationMaxChunkSeconds"
+        static let continuousDictationChunkOverlapSeconds = "continuousDictationChunkOverlapSeconds"
         static let continuousDictationPromptChainEnabled = "continuousDictationPromptChainEnabled"
         static let continuousDictationPromptChainMaxChars = "continuousDictationPromptChainMaxChars"
+        static let continuousDictationStripWhisperPunctuation = "continuousDictationStripWhisperPunctuation"
+        static let continuousDictationAutoEndPeriod = "continuousDictationAutoEndPeriod"
+        static let continuousDictationSentencePauseMaxSeconds = "continuousDictationSentencePauseMaxSeconds"
+        static let continuousDictationTrailingPeriodSeconds = "continuousDictationTrailingPeriodSeconds"
+        static let transcriptProcessingEnabled = "transcriptProcessingEnabled"
+        static let removeNonSpeechAnnotations = "removeNonSpeechAnnotations"
+        static let normalizeCapitalization = "normalizeCapitalization"
+        static let applyProperNounFixups = "applyProperNounFixups"
+        static let applyTextSubstitutions = "applyTextSubstitutions"
+        static let capitalizeFirstLetterAtLineStart = "capitalizeFirstLetterAtLineStart"
+        static let filterConsecutiveDuplicates = "filterConsecutiveDuplicates"
     }
 
     static let noSoundName = "None"
@@ -195,7 +207,7 @@ final class Preferences {
     var continuousDictationPauseSeconds: Double {
         get {
             let stored = defaults.double(forKey: Key.continuousDictationPauseSeconds)
-            return stored == 0 ? 0.5 : stored
+            return stored == 0 ? 1.0 : stored
         }
         set { defaults.set(newValue, forKey: Key.continuousDictationPauseSeconds) }
     }
@@ -203,9 +215,22 @@ final class Preferences {
     var continuousDictationMaxChunkSeconds: Double {
         get {
             let stored = defaults.double(forKey: Key.continuousDictationMaxChunkSeconds)
-            return stored == 0 ? 30.0 : stored
+            return stored == 0 ? 5.0 : stored
         }
         set { defaults.set(newValue, forKey: Key.continuousDictationMaxChunkSeconds) }
+    }
+
+    // Default 0.3 when unset. Uses `object(forKey:) == nil` instead of the
+    // `stored == 0` sentinel so users can explicitly disable overlap by
+    // setting 0 without bouncing back to the default on the next read.
+    var continuousDictationChunkOverlapSeconds: Double {
+        get {
+            if defaults.object(forKey: Key.continuousDictationChunkOverlapSeconds) == nil {
+                return 0.3
+            }
+            return defaults.double(forKey: Key.continuousDictationChunkOverlapSeconds)
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationChunkOverlapSeconds) }
     }
 
     var continuousDictationPromptChainEnabled: Bool {
@@ -224,6 +249,112 @@ final class Preferences {
             return stored == 0 ? 200 : stored
         }
         set { defaults.set(newValue, forKey: Key.continuousDictationPromptChainMaxChars) }
+    }
+
+    var continuousDictationStripWhisperPunctuation: Bool {
+        get { return defaults.bool(forKey: Key.continuousDictationStripWhisperPunctuation) }
+        set { defaults.set(newValue, forKey: Key.continuousDictationStripWhisperPunctuation) }
+    }
+
+    // Strip-punctuation mode only. Governs the trailing-period timer
+    // that fires after prolonged silence (configured by
+    // `continuousDictationTrailingPeriodSeconds`) and appends a
+    // closing `.`. OFF leaves the final sentence unclosed. Mid-dictation
+    // sentence breaks (the `". "` + capital prefix inside the gap
+    // window) are driven by the gap-based rule in both modes.
+    var continuousDictationAutoEndPeriod: Bool {
+        get {
+            if defaults.object(forKey: Key.continuousDictationAutoEndPeriod) == nil {
+                return true
+            }
+            return defaults.bool(forKey: Key.continuousDictationAutoEndPeriod)
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationAutoEndPeriod) }
+    }
+
+    // Strip-punctuation mode. The new-sentence window closes at this
+    // value; gaps longer than this fall into the "dead zone" where a
+    // resuming chunk gets `" "` continuation instead of `". "` + capital.
+    // Floor of the window is `continuousDictationPauseSeconds` (same knob
+    // that decides when a chunk emits); must stay at least 1.0 above it.
+    // Default 2.5.
+    var continuousDictationSentencePauseMaxSeconds: Double {
+        get {
+            let stored = defaults.double(forKey: Key.continuousDictationSentencePauseMaxSeconds)
+            return stored == 0 ? 2.5 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationSentencePauseMaxSeconds) }
+    }
+
+    // Strip-punctuation mode. When auto-end-period is on, this many
+    // seconds of silence from speech-end triggers injection of a closing
+    // `.`. Default 4.0 (4x the sentence-pause default). Independently
+    // editable.
+    var continuousDictationTrailingPeriodSeconds: Double {
+        get {
+            let stored = defaults.double(forKey: Key.continuousDictationTrailingPeriodSeconds)
+            return stored == 0 ? 4.0 : stored
+        }
+        set { defaults.set(newValue, forKey: Key.continuousDictationTrailingPeriodSeconds) }
+    }
+
+    // Root toggle for the post-processing pipeline. When off, whisper's
+    // raw transcript is injected as-is. When on, each of the five nested
+    // preferences below individually governs whether its pass runs.
+    var transcriptProcessingEnabled: Bool {
+        get {
+            if defaults.object(forKey: Key.transcriptProcessingEnabled) == nil { return true }
+            return defaults.bool(forKey: Key.transcriptProcessingEnabled)
+        }
+        set { defaults.set(newValue, forKey: Key.transcriptProcessingEnabled) }
+    }
+
+    var removeNonSpeechAnnotations: Bool {
+        get {
+            if defaults.object(forKey: Key.removeNonSpeechAnnotations) == nil { return true }
+            return defaults.bool(forKey: Key.removeNonSpeechAnnotations)
+        }
+        set { defaults.set(newValue, forKey: Key.removeNonSpeechAnnotations) }
+    }
+
+    var normalizeCapitalization: Bool {
+        get {
+            if defaults.object(forKey: Key.normalizeCapitalization) == nil { return true }
+            return defaults.bool(forKey: Key.normalizeCapitalization)
+        }
+        set { defaults.set(newValue, forKey: Key.normalizeCapitalization) }
+    }
+
+    var applyProperNounFixups: Bool {
+        get {
+            if defaults.object(forKey: Key.applyProperNounFixups) == nil { return true }
+            return defaults.bool(forKey: Key.applyProperNounFixups)
+        }
+        set { defaults.set(newValue, forKey: Key.applyProperNounFixups) }
+    }
+
+    var applyTextSubstitutions: Bool {
+        get {
+            if defaults.object(forKey: Key.applyTextSubstitutions) == nil { return true }
+            return defaults.bool(forKey: Key.applyTextSubstitutions)
+        }
+        set { defaults.set(newValue, forKey: Key.applyTextSubstitutions) }
+    }
+
+    var capitalizeFirstLetterAtLineStart: Bool {
+        get {
+            if defaults.object(forKey: Key.capitalizeFirstLetterAtLineStart) == nil { return true }
+            return defaults.bool(forKey: Key.capitalizeFirstLetterAtLineStart)
+        }
+        set { defaults.set(newValue, forKey: Key.capitalizeFirstLetterAtLineStart) }
+    }
+
+    var filterConsecutiveDuplicates: Bool {
+        get {
+            if defaults.object(forKey: Key.filterConsecutiveDuplicates) == nil { return true }
+            return defaults.bool(forKey: Key.filterConsecutiveDuplicates)
+        }
+        set { defaults.set(newValue, forKey: Key.filterConsecutiveDuplicates) }
     }
 
     // Words / tokens that the post-processing casing normalizer would
@@ -246,7 +377,7 @@ final class Preferences {
         "URL", "URI", "SSH", "FTP", "TCP", "UDP", "DNS", "CPU", "GPU", "RAM",
         "USB", "PDF", "PNG", "JPEG", "GIF", "SVG", "SSD", "HDD",
         "GitHub", "GitLab", "macOS", "iOS", "iPadOS", "watchOS", "tvOS",
-        "iCloud", "iPhone", "iPad", "iMac", "MacBook",
+        "iCloud", "iPhone", "iPad", "iMac", "MacBook", "Macbook Pro", "Mac Pro",
         "Monterey", "Ventura", "Sonoma", "Sequoia", "Catalina", "Mojave",
         "Big Sur", "High Sierra", "El Capitan",
         "YouTube", "Google", "Apple", "Microsoft", "Linux",
@@ -254,6 +385,7 @@ final class Preferences {
         "Python", "JavaScript", "TypeScript", "Swift", "Node.js", "npm",
         "USA", "UK", "EU", "UAE",
         "NASA", "FBI", "CIA", "NATO", "OPEC", "UNESCO", "UNICEF", "NGO", "GDP",
+        "PSW", "DF", "CPA", "SCIO", "ODSP", "OSAP",
         "Wi-Fi", "Bluetooth", "Ethernet",
         "NLP", "LLM", "GPT", "TPU", "CUDA",
         "OpenGL", "OpenCL", "Vulkan",
@@ -267,7 +399,43 @@ final class Preferences {
         "Pizza Hut", "Papa John's", "Little Caesars", "Dairy Queen",
         "Arby's", "Popeyes", "Red Lobster", "Boston Pizza", "Swiss Chalet",
         "Pizza Pizza", "Jimmy John's", "Panda Express", "Hardee's",
-        "Whataburger", "Culver's", "Panera", "Shake Shack"
+        "Whataburger", "Culver's", "Panera", "Shake Shack",
+        "Canada", "Ottawa",
+        "Alberta", "British Columbia", "Manitoba", "New Brunswick",
+        "Newfoundland and Labrador", "Nova Scotia", "Ontario",
+        "Prince Edward Island", "Quebec", "Saskatchewan",
+        "Edmonton", "Victoria", "Winnipeg", "Fredericton",
+        "St. John's", "Halifax", "Charlottetown", "Quebec City", "Regina",
+        "Toronto", "Vancouver", "Calgary",
+        "America", "United States", "D.C.", "D.C", "DC",
+        "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Los Angeles",
+        "San Diego", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia",
+        "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa",
+        "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland",
+        "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri",
+        "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey",
+        "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio",
+        "Oklahoma", "Oregon", "Portland", "Pennsylvania", "Rhode Island", "South Carolina",
+        "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
+        "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
+        "Montgomery", "Juneau", "Phoenix", "Little Rock", "Sacramento",
+        "Denver", "Hartford", "Dover", "Tallahassee", "Atlanta",
+        "Honolulu", "Boise", "Springfield", "Indianapolis", "Des Moines",
+        "Topeka", "Frankfort", "Baton Rouge", "Augusta", "Annapolis",
+        "Boston", "Lansing", "Saint Paul", "St. Paul", "Jackson",
+        "Jefferson City", "Helena", "Lincoln", "Carson City", "Concord",
+        "Trenton", "Santa Fe", "Albany", "Raleigh", "Bismarck",
+        "Columbus", "Oklahoma City", "Salem", "Harrisburg", "Providence",
+        "Columbia", "Pierre", "Nashville", "Austin", "Salt Lake City",
+        "Montpelier", "Richmond", "Olympia", "Charleston", "Madison",
+        "Cheyenne",
+        "Michael", "Andy", "Vasko", "Anujan", "Dylan", "Dave", "David",
+        "Raymond", "Johnson", "Jonathan", "Nick", "Brandon",
+        "Derek", "Emily", "Sarah", "Bill", "Curtis", "Curtiss",
+        "Billy", "Holly", "Laura", "Andrew", "Tyson", "Jenny",
+        "Jennifer", "Maria", "Jane", "Marie", "Sean", "Shawn",
+        "Ron", "Ronald", "Esther", "Leo", "Leonardo", "Leon",
+        "Nadia", "Larry", "Michelle", "Matt", "Matthew"
     ]
 
     // Post-process substitutions where the matched form differs from the
@@ -284,6 +452,19 @@ final class Preferences {
     }
 
     static let defaultTextSubstitutions: [(String, String)] = [
+        ("andi", "Andy"),
+        ("vasco", "Vasko"),
+        ("A new June", "Anujan"),
+        ("anujin", "Anujan"),
+        ("a newgen", "Anujan"),
+        ("a new gen", "Anujan"),
+        ("a new gin", "Anujan"),
+        ("a.m.", "am"),
+        ("p.m.", "pm"),
+        ("a.m", "am"),
+        ("p.m", "pm"),
+        ("A.m", "am"),
+        ("P.m", "pm"),
         ("mac os", "macOS"),
         ("kilobits per second", "Kbps"),
         ("megabits per second", "Mbps"),
@@ -298,7 +479,12 @@ final class Preferences {
         ("chick fill a", "Chick-fil-A"),
         ("chickfila", "Chick-fil-A"),
         ("chick filet", "Chick-fil-A"),
-        ("chick fillet", "Chick-fil-A")
+        ("chick fillet", "Chick-fil-A"),
+        // Strip mode removes the period in "St. John's" / "St. Paul"
+        // before fixups can match. Restore the canonical form via
+        // substitution on the stripped text.
+        ("st john's", "St. John's"),
+        ("st paul", "St. Paul")
     ]
 
     var silenceAutoStopThreshold: Double {
@@ -460,8 +646,20 @@ final class Preferences {
         Key.skippedUpdateVersion,
         Key.continuousDictationEnabled, Key.continuousDictationPauseSeconds,
         Key.continuousDictationMaxChunkSeconds,
+        Key.continuousDictationChunkOverlapSeconds,
         Key.continuousDictationPromptChainEnabled,
-        Key.continuousDictationPromptChainMaxChars
+        Key.continuousDictationPromptChainMaxChars,
+        Key.continuousDictationStripWhisperPunctuation,
+        Key.continuousDictationAutoEndPeriod,
+        Key.continuousDictationSentencePauseMaxSeconds,
+        Key.continuousDictationTrailingPeriodSeconds,
+        Key.transcriptProcessingEnabled,
+        Key.removeNonSpeechAnnotations,
+        Key.normalizeCapitalization,
+        Key.applyProperNounFixups,
+        Key.applyTextSubstitutions,
+        Key.capitalizeFirstLetterAtLineStart,
+        Key.filterConsecutiveDuplicates
     ]
 
     // MARK: - Keychain

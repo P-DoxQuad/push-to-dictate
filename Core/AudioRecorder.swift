@@ -8,7 +8,21 @@ final class AudioRecorder {
     var onLevel: ((Float) -> Void)?
     var onCaptureSaved: ((URL) -> Void)?
     var onAutoStopTriggered: (() -> Void)?
-    var onChunkBoundary: (([Float]) -> Void)?
+    // Chunk callback receives the captured samples, the preceding gap
+    // (seconds of silence between the previous chunk's last speech sample
+    // and this chunk's first speech sample; 0 for the first chunk of a
+    // session), and a flag indicating whether this emit was triggered by
+    // the max-chunk duration cap (true) or by a natural pause (false).
+    // The latter lets the consumer distinguish mid-speech cuts (where
+    // acoustic overlap matters) from clean sentence-break cuts.
+    var onChunkBoundary: (([Float], TimeInterval, Bool) -> Void)?
+    // Fires on the audio thread each time RMS crosses the chunk-boundary
+    // threshold from below (speech-begin transition), including the first
+    // speech of a chunk and every resumption after mid-chunk silence.
+    // Used by StatusItemController to pre-emptively cancel the pending
+    // trailing-period timer the moment the user starts speaking again,
+    // rather than waiting for the next chunk to finish transcribing.
+    var onSpeechBegin: (() -> Void)?
 
     // Set to non-nil to enable silence-based auto-stop. Threshold is the RMS
     // floor below which audio counts as silent; duration is how many seconds
@@ -33,7 +47,22 @@ final class AudioRecorder {
     // better than you'd expect for short chunks.
     var chunkBoundaryMaxDuration: TimeInterval?
 
+    // Seconds of trailing audio to retain from a max-chunk-triggered cut
+    // and prepend to the next chunk's buffer. Gives whisper acoustic
+    // context on both sides of a mid-speech cut so the boundary word is
+    // transcribed from a full utterance rather than a fragment. Only
+    // applies to max-chunk cuts; pause-triggered cuts never overlap
+    // because they end in silence. Nil or 0 disables the behavior.
+    var chunkBoundaryOverlapSeconds: TimeInterval?
+
     private(set) var peakRMS: Float = 0
+
+    // True iff speech has been detected in the current chunk slot and no
+    // emit has reset the flag yet. Writes happen on the audio thread;
+    // single-Bool reads from any thread are safe in practice. Used by
+    // StatusItemController to suppress scheduling the trailing-period
+    // timer when a chunk was force-emitted mid-speech (max-chunk cap).
+    var isSpeaking: Bool { return chunkHasSpeech }
 
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
@@ -45,6 +74,16 @@ final class AudioRecorder {
     private var chunkHasSpeech: Bool = false
     private var chunkSilentSince: Date?
     private var chunkSampleCount: Int = 0
+    // Timestamps for preceding-gap computation. `previousChunkLastSpeechAt`
+    // is captured at emitChunk time (the moment silence first began in the
+    // emitted chunk). `currentChunkFirstSpeechAt` is captured when the next
+    // chunk's first speech-level sample arrives. Their difference is the
+    // silence gap between consecutive chunks.
+    private var previousChunkLastSpeechAt: Date?
+    private var currentChunkFirstSpeechAt: Date?
+    // Carried samples from the tail of a max-chunk-triggered emit, waiting
+    // to be prepended to the next chunk when speech resumes.
+    private var overlapCarry: [Float] = []
 
     func start() throws {
         if engine.isRunning { return }
@@ -55,6 +94,9 @@ final class AudioRecorder {
         chunkHasSpeech = false
         chunkSilentSince = nil
         chunkSampleCount = 0
+        previousChunkLastSpeechAt = nil
+        currentChunkFirstSpeechAt = nil
+        overlapCarry.removeAll(keepingCapacity: true)
         try applyPreferredInputDevice()
 
         let inputNode = engine.inputNode
@@ -141,13 +183,48 @@ final class AudioRecorder {
         if let threshold = chunkBoundaryThreshold,
            let duration = chunkBoundaryDuration {
             if level >= threshold {
+                if !chunkHasSpeech {
+                    if currentChunkFirstSpeechAt == nil {
+                        currentChunkFirstSpeechAt = Date()
+                    }
+                    // Speech-begin transition: discard any pre-speech
+                    // silence that accumulated in the buffer since the
+                    // last emit (or session start). Otherwise a long
+                    // pre-speech silence would push chunkSampleCount
+                    // past chunkBoundaryMaxDuration the moment speech
+                    // arrived, emitting a chunk containing mostly
+                    // silence and triggering whisper hallucinations.
+                    // Also reset the sample counter so max-chunk
+                    // duration measures speech+within-speech time, not
+                    // session-silence time. The current pcm's samples
+                    // are appended below; async ordering on bufferQueue
+                    // guarantees the clear runs before them.
+                    //
+                    // If the previous emit was a max-chunk cut and
+                    // overlap is configured, overlapCarry holds the
+                    // tail samples; seed the new buffer with them so
+                    // whisper sees acoustic context across the cut.
+                    // Carry is consumed on first use and chunkSampleCount
+                    // is pre-seeded with its sample count so max-chunk
+                    // duration counts the overlap against the cap.
+                    let carryCopy = overlapCarry
+                    overlapCarry.removeAll(keepingCapacity: true)
+                    bufferQueue.async { [weak self] in
+                        self?.buffer.removeAll(keepingCapacity: true)
+                        if !carryCopy.isEmpty {
+                            self?.buffer.append(contentsOf: carryCopy)
+                        }
+                    }
+                    chunkSampleCount = carryCopy.count
+                    onSpeechBegin?()
+                }
                 chunkHasSpeech = true
                 chunkSilentSince = nil
             } else if chunkHasSpeech {
                 if chunkSilentSince == nil {
                     chunkSilentSince = Date()
                 } else if Date().timeIntervalSince(chunkSilentSince!) >= duration {
-                    emitChunk()
+                    emitChunk(wasMaxChunkCut: false)
                 }
             }
         }
@@ -187,24 +264,51 @@ final class AudioRecorder {
             if chunkHasSpeech,
                let maxDuration = chunkBoundaryMaxDuration,
                Double(chunkSampleCount) / AudioRecorder.targetSampleRate >= maxDuration {
-                emitChunk()
+                emitChunk(wasMaxChunkCut: true)
             }
         }
     }
 
-    private func emitChunk() {
+    private func emitChunk(wasMaxChunkCut: Bool) {
         var chunk: [Float] = []
         bufferQueue.sync {
             chunk = buffer
             buffer.removeAll(keepingCapacity: true)
         }
+        // On a max-chunk cut, retain the trailing chunkBoundaryOverlapSeconds
+        // of audio to be prepended to the next chunk's buffer. Not applied
+        // to pause-triggered cuts: they end in silence, so there's no
+        // useful acoustic context to carry.
+        if wasMaxChunkCut,
+           let overlap = chunkBoundaryOverlapSeconds, overlap > 0,
+           !chunk.isEmpty {
+            let overlapSamples = Int(overlap * AudioRecorder.targetSampleRate)
+            if overlapSamples > 0 && overlapSamples < chunk.count {
+                overlapCarry = Array(chunk.suffix(overlapSamples))
+            }
+        }
+        // Compute the silence gap preceding this chunk, before resetting
+        // state for the next chunk. Gap is 0 for the first chunk of a
+        // session (no previous chunk to measure against).
+        let gap: TimeInterval
+        if let prevEnd = previousChunkLastSpeechAt,
+           let currStart = currentChunkFirstSpeechAt {
+            gap = currStart.timeIntervalSince(prevEnd)
+        } else {
+            gap = 0
+        }
+        // Remember when this chunk's last speech was so the next chunk
+        // can measure its preceding gap. chunkSilentSince was set when
+        // silence first began after the last speech sample in this chunk.
+        previousChunkLastSpeechAt = chunkSilentSince
+        currentChunkFirstSpeechAt = nil
         chunkHasSpeech = false
         chunkSilentSince = nil
         chunkSampleCount = 0
         peakRMS = 0
         if chunk.isEmpty { return }
         if let onChunkBoundary = onChunkBoundary {
-            DispatchQueue.main.async { onChunkBoundary(chunk) }
+            DispatchQueue.main.async { onChunkBoundary(chunk, gap, wasMaxChunkCut) }
         }
     }
 
@@ -238,7 +342,14 @@ final class AudioRecorder {
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyyMMdd-HHmmss"
         let url = dir.appendingPathComponent("recording-\(fmt.string(from: Date())).wav")
+        return AudioRecorder.writeSamplesAsWav(samples: samples, to: url) ? url : nil
+    }
 
+    // Writes 16 kHz mono float samples to `url` as a 16-bit PCM WAV.
+    // Returns true on success. Exposed for callers (like
+    // `StatusItemController`'s per-chunk debug capture) that build their
+    // own output paths.
+    static func writeSamplesAsWav(samples: [Float], to url: URL) -> Bool {
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: AudioRecorder.targetSampleRate,
@@ -247,19 +358,16 @@ final class AudioRecorder {
             AVLinearPCMIsFloatKey: false,
             AVLinearPCMIsBigEndianKey: false
         ]
-
         guard let outFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: AudioRecorder.targetSampleRate,
             channels: 1,
             interleaved: false
-        ) else { return nil }
-
+        ) else { return false }
         do {
             let file = try AVAudioFile(forWriting: url, settings: settings,
                                        commonFormat: .pcmFormatFloat32,
                                        interleaved: false)
-
             let chunkFrames = 4096
             var offset = 0
             while offset < samples.count {
@@ -277,9 +385,9 @@ final class AudioRecorder {
                 try file.write(from: buf)
                 offset += toWrite
             }
-            return url
+            return true
         } catch {
-            return nil
+            return false
         }
     }
 
@@ -293,12 +401,22 @@ final class AudioRecorder {
     // MARK: - Input device selection
 
     private func applyPreferredInputDevice() throws {
+        // Empty UID means "follow the current system default input". Must
+        // actively resolve and set it: AVAudioEngine's inputNode retains
+        // whatever device was last pinned on its audio unit, so after
+        // selecting a specific device once, switching prefs back to
+        // Default would otherwise leave the previous device stuck. Also
+        // handles the case where System Preferences' default input
+        // changes after process start.
         let uid = Preferences.shared.inputDeviceUID
-        guard !uid.isEmpty else { return }
-        guard let deviceID = AudioRecorder.audioDeviceID(forUID: uid) else { return }
-        var id = deviceID
-        let au = engine.inputNode.audioUnit
-        guard let unit = au else { return }
+        let resolved: AudioDeviceID?
+        if uid.isEmpty {
+            resolved = AudioRecorder.systemDefaultInputDeviceID()
+        } else {
+            resolved = AudioRecorder.audioDeviceID(forUID: uid)
+        }
+        guard var id = resolved else { return }
+        guard let unit = engine.inputNode.audioUnit else { return }
         let size = UInt32(MemoryLayout<AudioDeviceID>.size)
         let status = AudioUnitSetProperty(
             unit,
@@ -313,6 +431,20 @@ final class AudioRecorder {
                           userInfo: [NSLocalizedDescriptionKey:
                             "Could not set input device (OSStatus \(status))"])
         }
+    }
+
+    private static func systemDefaultInputDeviceID() -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMaster
+        )
+        var id: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id)
+        if status != noErr || id == 0 { return nil }
+        return id
     }
 
     static func availableInputDevices() -> [(uid: String, name: String)] {

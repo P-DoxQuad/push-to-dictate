@@ -37,6 +37,45 @@ final class StatusItemController: NSObject,
     // has language-model context across chunk boundaries. Reset on session
     // start. Capped so the whisper prompt token budget isn't exceeded.
     private var continuousPromptBuffer: String = ""
+    // True until the first injected chunk of a continuous session. Used
+    // by the leading-separator policy (strip-punctuation mode) to suppress
+    // the prefix on the very first chunk, where no preceding gap exists.
+    private var isFirstContinuousChunk: Bool = true
+    // True iff the most recent injected chunk ended with `?` or `!`. Used
+    // by the leading-separator policy to avoid stacking a `. ` prefix after
+    // a sentence terminator whisper already emitted.
+    private var previousInjectedEndedWithSentencePunct: Bool = false
+    // Monotonic session counter. Each continuous session start increments
+    // it. Chunks capture the session they were enqueued in so late-arriving
+    // results from a prior session can be identified and discarded,
+    // preventing them from corrupting the new session's first-chunk state.
+    private var currentContinuousSessionId: Int = 0
+    // Strip-punctuation mode: pending trailing-period injection. Scheduled
+    // after each injected chunk; cancelled when a subsequent chunk arrives
+    // or the session restarts. Fires only when the user falls fully silent
+    // past the configured threshold.
+    private var trailingPeriodWorkItem: DispatchWorkItem?
+    // True iff the previous emitted chunk was a max-chunk cut. Used by the
+    // acoustic-overlap feature to decide whether to run leading-word dedup
+    // on the current chunk's raw transcript. Reset on session start.
+    private var previousChunkWasMaxCut: Bool = false
+    // Case-folded alphanumeric tokens from the end of the previous chunk's
+    // raw transcript (up to ~5 tokens). Used to detect and drop duplicate
+    // leading words in the next chunk's transcript when acoustic overlap
+    // is active. Reset on session start.
+    private var previousChunkTailTokens: [String] = []
+    // Last word (lowercased) of the string actually injected for the
+    // previous chunk. Used by the consecutive-duplicate filter to catch
+    // cross-chunk duplicates that the overlap dedup missed (whisper
+    // rendered the overlapping word slightly differently in the two
+    // chunks, so string-equality dedup didn't fire). Reset on session start.
+    private var previousInjectedLastWord: String?
+    // Per-session directory for debug WAVs + sidecar text files, one
+    // folder per continuous dictation session when Save debug recordings
+    // is on. Lazy-created on first chunk; nil otherwise. Reset on session
+    // start so each session gets its own folder.
+    private var debugSessionDir: URL?
+    private var debugChunkCounter: Int = 0
 
     private enum IconState { case idle, recording, processing, error }
     private var iconState: IconState = .idle
@@ -406,6 +445,16 @@ final class StatusItemController: NSObject,
             // flip our icon back to .idle while this new session is active.
             drainingAfterContinuous = false
             continuousPromptBuffer = ""
+            isFirstContinuousChunk = true
+            previousInjectedEndedWithSentencePunct = false
+            previousChunkWasMaxCut = false
+            previousChunkTailTokens = []
+            previousInjectedLastWord = nil
+            debugSessionDir = nil
+            debugChunkCounter = 0
+            trailingPeriodWorkItem?.cancel()
+            trailingPeriodWorkItem = nil
+            currentContinuousSessionId += 1
             continuousModeActive =
                 hotkeyMonitor.mode == .toggle &&
                 Preferences.shared.continuousDictationEnabled
@@ -428,7 +477,11 @@ final class StatusItemController: NSObject,
                 let minSamples = Int(AudioRecorder.targetSampleRate * 0.4)
                 if samples.count >= minSamples
                     && peak >= StatusItemController.silentPeakThreshold {
-                    enqueueContinuousChunk(samples: samples)
+                    // Final tail chunk from session end has no measured gap.
+                    // Session-end is a clean cut on a user-initiated stop,
+                    // not a mid-speech max-chunk cut, so no overlap dedup.
+                    enqueueContinuousChunk(samples: samples, gap: 0,
+                                           wasMaxChunkCut: false)
                 }
                 if pendingContinuousChunks > 0 {
                     drainingAfterContinuous = true
@@ -479,27 +532,53 @@ final class StatusItemController: NSObject,
             audioRecorder.chunkBoundaryThreshold = Float(prefs.silenceAutoStopThreshold)
             audioRecorder.chunkBoundaryDuration = prefs.continuousDictationPauseSeconds
             audioRecorder.chunkBoundaryMaxDuration = prefs.continuousDictationMaxChunkSeconds
-            audioRecorder.onChunkBoundary = { [weak self] samples in
-                self?.handleContinuousChunk(samples)
+            let overlap = prefs.continuousDictationChunkOverlapSeconds
+            audioRecorder.chunkBoundaryOverlapSeconds = overlap > 0 ? overlap : nil
+            audioRecorder.onChunkBoundary = { [weak self] samples, gap, wasMaxChunkCut in
+                self?.handleContinuousChunk(samples, gap: gap,
+                                            wasMaxChunkCut: wasMaxChunkCut)
+            }
+            // Cancel the trailing-period timer the moment speech resumes,
+            // rather than when the next chunk finishes transcribing. Without
+            // this, a user who resumes talking within trailingPeriodSeconds
+            // still gets a period planted before their next chunk lands,
+            // because the timer counts wall-clock time from the previous
+            // injection regardless of incoming audio.
+            audioRecorder.onSpeechBegin = { [weak self] in
+                DispatchQueue.main.async {
+                    self?.trailingPeriodWorkItem?.cancel()
+                    self?.trailingPeriodWorkItem = nil
+                }
             }
         } else {
             audioRecorder.chunkBoundaryThreshold = nil
             audioRecorder.chunkBoundaryDuration = nil
             audioRecorder.chunkBoundaryMaxDuration = nil
+            audioRecorder.chunkBoundaryOverlapSeconds = nil
             audioRecorder.onChunkBoundary = nil
+            audioRecorder.onSpeechBegin = nil
         }
     }
 
-    private func handleContinuousChunk(_ samples: [Float]) {
+    private func handleContinuousChunk(_ samples: [Float], gap: TimeInterval,
+                                       wasMaxChunkCut: Bool) {
         // Mid-recording boundary fire. Final-tail chunk is enqueued directly
         // from setRecording(false) and uses its own length / peak guards.
         let minSamples = Int(AudioRecorder.targetSampleRate * 0.4)
         if samples.count < minSamples { return }
-        enqueueContinuousChunk(samples: samples)
+        enqueueContinuousChunk(samples: samples, gap: gap,
+                               wasMaxChunkCut: wasMaxChunkCut)
     }
 
-    private func enqueueContinuousChunk(samples: [Float]) {
+    private func enqueueContinuousChunk(samples: [Float], gap: TimeInterval,
+                                        wasMaxChunkCut: Bool) {
+        let sessionId = currentContinuousSessionId
         pendingContinuousChunks += 1
+        debugChunkCounter += 1
+        let chunkNumber = debugChunkCounter
+        let debugWavURL = writeChunkDebugWavIfEnabled(samples: samples,
+                                                      chunkNumber: chunkNumber,
+                                                      wasMaxChunkCut: wasMaxChunkCut)
         let transcriber = makeTranscriber()
         // Beam=2 for continuous chunks. Compromise between beam=1's speed
         // and beam=3's repetition-loop safety; prompt chaining and larger
@@ -539,8 +618,93 @@ final class StatusItemController: NSObject,
             // Synchronous dispatch so this chunk's text is committed to the
             // prompt buffer before the next serial task starts reading it.
             DispatchQueue.main.sync {
-                self?.handleContinuousResult(captured, elapsed: elapsed)
+                self?.handleContinuousResult(captured, elapsed: elapsed, gap: gap,
+                                             sessionId: sessionId,
+                                             wasMaxChunkCut: wasMaxChunkCut,
+                                             debugWavURL: debugWavURL)
             }
+        }
+    }
+
+    // Writes per-chunk audio to disk when `Save debug recordings` is on
+    // and we're in continuous mode. Lazy-creates a session folder on the
+    // first chunk. Returns the WAV URL so the caller can thread it through
+    // to `handleContinuousResult` for the sibling .txt. Nil disables.
+    private func writeChunkDebugWavIfEnabled(samples: [Float],
+                                             chunkNumber: Int,
+                                             wasMaxChunkCut: Bool) -> URL? {
+        guard Preferences.shared.saveDebugRecordings else { return nil }
+        guard continuousModeActive else { return nil }
+
+        let fm = FileManager.default
+        if debugSessionDir == nil {
+            guard let appSupport = fm.urls(for: .applicationSupportDirectory,
+                                           in: .userDomainMask).first else { return nil }
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyyMMdd-HHmmss"
+            let dir = appSupport
+                .appendingPathComponent("push-to-dictate/debug", isDirectory: true)
+                .appendingPathComponent("session-\(fmt.string(from: Date()))",
+                                        isDirectory: true)
+            do {
+                try fm.createDirectory(at: dir,
+                                       withIntermediateDirectories: true,
+                                       attributes: nil)
+            } catch {
+                Logger.error("debug session dir", detail: error.localizedDescription)
+                return nil
+            }
+            debugSessionDir = dir
+        }
+        guard let dir = debugSessionDir else { return nil }
+
+        let reason = wasMaxChunkCut ? "maxchunk" : "pause"
+        let name = String(format: "chunk-%03d-%@.wav", chunkNumber, reason)
+        let url = dir.appendingPathComponent(name)
+        if AudioRecorder.writeSamplesAsWav(samples: samples, to: url) {
+            return url
+        } else {
+            Logger.error("debug chunk wav", detail: "write failed for \(url.path)")
+            return nil
+        }
+    }
+
+    // Writes the sibling .txt next to `debugWavURL` with all the
+    // metadata needed to diagnose what whisper heard and how the
+    // overlap/dedup/filter stages shaped the result.
+    private func writeChunkDebugMetadataIfEnabled(debugWavURL: URL?,
+                                                  gap: TimeInterval,
+                                                  elapsed: TimeInterval,
+                                                  wasMaxChunkCut: Bool,
+                                                  rawText: String,
+                                                  dedupedText: String,
+                                                  prevTail: [String],
+                                                  newHead: [String],
+                                                  matchLen: Int,
+                                                  cleaned: String,
+                                                  injected: String,
+                                                  prevInjectedLastWord: String?) {
+        guard let wavURL = debugWavURL else { return }
+        let txtURL = wavURL.deletingPathExtension().appendingPathExtension("txt")
+        let reason = wasMaxChunkCut ? "maxchunk" : "pause"
+        var body = ""
+        body += "wav: \(wavURL.lastPathComponent)\n"
+        body += String(format: "gap: %.2fs\n", gap)
+        body += String(format: "elapsed: %.2fs\n", elapsed)
+        body += "cut: \(reason)\n"
+        body += "raw: \(rawText)\n"
+        body += "deduped: \(dedupedText)\n"
+        body += "prevTail: \(prevTail)\n"
+        body += "newHead: \(newHead)\n"
+        body += "matchLen: \(matchLen)\n"
+        body += "cleaned: \(cleaned)\n"
+        body += "injected: \(injected)\n"
+        body += "prevInjectedLastWord: \(prevInjectedLastWord ?? "(nil)")\n"
+        do {
+            try body.write(to: txtURL, atomically: true, encoding: .utf8)
+        } catch {
+            Logger.error("debug chunk txt",
+                         detail: "write failed for \(txtURL.path): \(error.localizedDescription)")
         }
     }
 
@@ -558,6 +722,68 @@ final class StatusItemController: NSObject,
         }
     }
 
+    // Strip-mode trailing-period: appends "." to the existing prompt
+    // buffer tail without a word-separator, after trimming any trailing
+    // whitespace, so whisper's context sees "lastWord." as the sentence
+    // close rather than "lastWord .".
+    private func appendPeriodToContinuousPromptBuffer() {
+        while let last = continuousPromptBuffer.last,
+              last == " " || last == "\t" || last == "\n" {
+            continuousPromptBuffer.removeLast()
+        }
+        if continuousPromptBuffer.isEmpty { return }
+        continuousPromptBuffer.append(".")
+        let max = Preferences.shared.continuousDictationPromptChainMaxChars
+        if continuousPromptBuffer.count > max {
+            let overflow = continuousPromptBuffer.count - max
+            let start = continuousPromptBuffer.index(
+                continuousPromptBuffer.startIndex, offsetBy: overflow)
+            continuousPromptBuffer = String(continuousPromptBuffer[start...])
+        }
+    }
+
+    private func scheduleTrailingPeriod() {
+        let seconds = Preferences.shared.continuousDictationTrailingPeriodSeconds
+        if seconds <= 0 { return }
+        let sessionId = currentContinuousSessionId
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            if sessionId != self.currentContinuousSessionId { return }
+            self.textInjector.insert(".")
+            self.previousInjectedEndedWithSentencePunct = true
+            if Preferences.shared.continuousDictationPromptChainEnabled {
+                self.appendPeriodToContinuousPromptBuffer()
+            }
+            self.trailingPeriodWorkItem = nil
+            Logger.info("continuous: trailing period injected (silence > \(seconds)s)")
+        }
+        trailingPeriodWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
+    // Standard-mode counterpart to scheduleTrailingPeriod. Fires once after
+    // the configured number of seconds unless the user starts a new recording
+    // first (setRecording(true) cancels trailingPeriodWorkItem). Skipped when
+    // the injected text already ends with sentence-terminating punctuation, so
+    // dictations that naturally resolve (`"Where are you?"`, `"Watch out!"`)
+    // aren't followed by a stray period.
+    private func scheduleStandardTrailingPeriodIfNeeded(for injected: String) {
+        guard Preferences.shared.continuousDictationAutoEndPeriod else { return }
+        let seconds = Preferences.shared.continuousDictationTrailingPeriodSeconds
+        if seconds <= 0 { return }
+        if let last = injected.last, last == "." || last == "?" || last == "!" {
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.textInjector.insert(".")
+            self.trailingPeriodWorkItem = nil
+            Logger.info("standard: trailing period injected (silence > \(seconds)s)")
+        }
+        trailingPeriodWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
     // Removes whisper's non-speech annotation tokens that leak into the
     // transcript on silent / near-silent chunks: things like [BLANK_AUDIO],
     // [MUSIC], (soft music), (laughter). In single-shot dictation these are
@@ -568,19 +794,38 @@ final class StatusItemController: NSObject,
     // strips trailing ellipses (whisper's way of marking partial speech at
     // a chunk tail), and normalizes casing to lowercase with capitals only
     // at sentence starts.
-    private static func postProcessTranscript(_ text: String) -> String {
+    private static func postProcessTranscript(_ text: String,
+                                              stripPunctuation: Bool = false) -> String {
+        let prefs = Preferences.shared
+        // Root gate: when off, whisper's raw transcript bypasses every
+        // post-processing pass and is returned verbatim. Each nested
+        // preference below individually governs its pass when the root
+        // is on.
+        if !prefs.transcriptProcessingEnabled { return text }
+
         var cleaned = text
-        let patterns = [
-            "\\[[^\\]]*\\]",
-            "\\([^\\)]*\\)"
-        ]
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-                continue
+        if prefs.removeNonSpeechAnnotations {
+            let patterns = [
+                "\\[[^\\]]*\\]",
+                "\\([^\\)]*\\)",
+                // Asterisk-delimited sound annotations whisper emits on
+                // near-silent or non-speech chunks: *cough*, *laughs*,
+                // *sighs*, *music playing*, etc. Match a `*` followed by
+                // non-`*` content and a closing `*`.
+                "\\*[^*]*\\*",
+                // Leading angle-bracket artifacts whisper emits on silent or
+                // near-silent chunks (e.g. ">> I" when transcribing a long
+                // silence). Strip them along with any surrounding whitespace.
+                "^\\s*>+\\s*"
+            ]
+            for pattern in patterns {
+                guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+                    continue
+                }
+                let range = NSRange(cleaned.startIndex..., in: cleaned)
+                cleaned = regex.stringByReplacingMatches(
+                    in: cleaned, options: [], range: range, withTemplate: "")
             }
-            let range = NSRange(cleaned.startIndex..., in: cleaned)
-            cleaned = regex.stringByReplacingMatches(
-                in: cleaned, options: [], range: range, withTemplate: "")
         }
         if let ws = try? NSRegularExpression(pattern: "\\s+", options: []) {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
@@ -588,11 +833,30 @@ final class StatusItemController: NSObject,
                 in: cleaned, options: [], range: range, withTemplate: " ")
         }
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let ellipsis = try? NSRegularExpression(
+        if prefs.removeNonSpeechAnnotations,
+           let ellipsis = try? NSRegularExpression(
             pattern: "(?:\\.{3,}|…+)\\s*$", options: []) {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
             cleaned = ellipsis.stringByReplacingMatches(
                 in: cleaned, options: [], range: range, withTemplate: "")
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if stripPunctuation {
+            // Strip sentence-ending periods only: a period followed by
+            // whitespace or end-of-string. Periods inside words are
+            // preserved so proper nouns like "whisper.cpp" and "Node.js"
+            // survive. Question marks and exclamation marks are preserved
+            // too: their intonation-driven signal from whisper is kept.
+            if let regex = try? NSRegularExpression(pattern: "\\.+(?=\\s|$)", options: []) {
+                let range = NSRange(cleaned.startIndex..., in: cleaned)
+                cleaned = regex.stringByReplacingMatches(
+                    in: cleaned, options: [], range: range, withTemplate: " ")
+            }
+            if let ws = try? NSRegularExpression(pattern: "\\s+", options: []) {
+                let range = NSRange(cleaned.startIndex..., in: cleaned)
+                cleaned = ws.stringByReplacingMatches(
+                    in: cleaned, options: [], range: range, withTemplate: " ")
+            }
             cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         // Require at least one letter or digit, else treat as empty (drops
@@ -601,7 +865,17 @@ final class StatusItemController: NSObject,
             CharacterSet.alphanumerics.contains($0)
         }
         if !hasContent { return "" }
-        return applyTextSubstitutions(applyCapitalizationFixups(normalizeCasing(cleaned)))
+        var out = cleaned
+        if prefs.normalizeCapitalization {
+            out = normalizeCasing(out)
+        }
+        if prefs.applyProperNounFixups {
+            out = applyCapitalizationFixups(out)
+        }
+        if prefs.applyTextSubstitutions {
+            out = applyTextSubstitutions(out)
+        }
+        return out
     }
 
     // Applies pattern -> replacement substitutions where the matched
@@ -659,24 +933,27 @@ final class StatusItemController: NSObject,
     // capitalized even when it is a mid-sentence continuation of the
     // previous chunk; acceptable because pauses long enough to trigger
     // a chunk boundary usually fall on sentence breaks anyway.
+    // Lowercase any uppercase letter that is not preceded by sentence-ending
+    // punctuation + whitespace (`. `, `! `, `? `). Whisper-emitted capitals at
+    // genuine sentence starts are preserved; mid-sentence capitals that whisper
+    // introduced (shouty-case artifacts, hallucinated proper nouns) are folded
+    // to lowercase. In strip mode the caller has already removed sentence
+    // periods before this runs, so there are no `. ` anchors left and the
+    // regex collapses to "lowercase everything"; chunk-join logic then adds
+    // capitals back at chunk boundaries as needed. First-letter-of-transcript
+    // capitalization in toggle mode is applied after this, outside
+    // postProcessTranscript, driven by CursorContext.isCursorAtLineStart.
     private static func normalizeCasing(_ text: String) -> String {
-        let lower = text.lowercased()
-        var result = String()
-        result.reserveCapacity(lower.count)
-        var needsCapital = true
-        for ch in lower {
-            if ch == "." || ch == "!" || ch == "?" {
-                result.append(ch)
-                needsCapital = true
-            } else if ch == " " || ch == "\t" || ch == "\n" {
-                result.append(ch)
-            } else {
-                if needsCapital && ch >= "a" && ch <= "z" {
-                    result.append(String(ch).uppercased())
-                } else {
-                    result.append(ch)
-                }
-                needsCapital = false
+        var result = text
+        if let regex = try? NSRegularExpression(
+            pattern: "(?<![.!?]\\s)[A-Z]", options: []) {
+            let range = NSRange(result.startIndex..., in: result)
+            let matches = regex.matches(in: result, options: [], range: range)
+            // Iterate in reverse so earlier range replacements don't shift
+            // the indices of later matches.
+            for match in matches.reversed() {
+                guard let r = Range(match.range, in: result) else { continue }
+                result.replaceSubrange(r, with: result[r].lowercased())
             }
         }
         // Re-uppercase the standalone pronoun "i" and its contractions
@@ -692,24 +969,229 @@ final class StatusItemController: NSObject,
     }
 
     private func handleContinuousResult(_ result: TranscriberResult?,
-                                        elapsed: TimeInterval) {
+                                        elapsed: TimeInterval,
+                                        gap: TimeInterval,
+                                        sessionId: Int,
+                                        wasMaxChunkCut: Bool,
+                                        debugWavURL: URL?) {
         pendingContinuousChunks -= 1
+        // Stale chunk from a prior session (user stopped and restarted
+        // before this one finished transcribing). Drop it rather than
+        // injecting into the new session, which would corrupt the new
+        // session's first-chunk state and visually plant leftover text
+        // where the user didn't dictate it.
+        let isStale = sessionId != currentContinuousSessionId
+        if isStale {
+            if let result = result, case .success(let text) = result {
+                Logger.info(String(format: "continuous: dropping stale chunk from prior session (%.2fs, gap=%.2fs): %@",
+                                   elapsed, gap, text))
+            }
+            if drainingAfterContinuous && pendingContinuousChunks == 0 {
+                drainingAfterContinuous = false
+                setIconState(.idle)
+            }
+            return
+        }
+        // New chunk is landing: cancel any pending trailing-period that was
+        // armed by the previous chunk. If this chunk itself warrants one,
+        // we re-arm at the bottom of the strip-mode branch.
+        trailingPeriodWorkItem?.cancel()
+        trailingPeriodWorkItem = nil
         if let result = result {
             switch result {
-            case .success(let text):
-                Logger.info(String(format: "continuous transcript (%.2fs): %@",
-                                   elapsed, text))
-                let cleaned = StatusItemController.postProcessTranscript(text)
-                if !cleaned.isEmpty {
-                    // Trailing space (rather than leading-space-after-first)
-                    // separates chunks correctly even when the user hits
-                    // Enter mid-session or toggles across sessions, without
-                    // leaving a stray space on the new line.
-                    textInjector.insert("\(cleaned) ")
-                    if Preferences.shared.continuousDictationPromptChainEnabled {
-                        appendToContinuousPromptBuffer(cleaned)
+            case .success(let rawText):
+                Logger.info(String(format: "continuous transcript (%.2fs, gap=%.2fs): %@",
+                                   elapsed, gap, rawText))
+                let prefs = Preferences.shared
+                // Acoustic-overlap dedup: if the previous chunk was a
+                // max-chunk cut and overlap was configured, whisper has
+                // transcribed the overlapped leading audio twice. Drop
+                // the duplicate leading tokens in the current raw text
+                // before any downstream processing (strip, prompt chain).
+                let text: String
+                let dedupPrevTail = previousChunkTailTokens
+                var dedupHeadTokens: [String] = []
+                var dedupMatchLen = 0
+                if previousChunkWasMaxCut,
+                   prefs.continuousDictationChunkOverlapSeconds > 0,
+                   !previousChunkTailTokens.isEmpty {
+                    dedupHeadTokens = StatusItemController.leadingTokensWithEnd(
+                        rawText, upTo: previousChunkTailTokens.count).map { $0.0 }
+                    let trimmed = StatusItemController.dedupeOverlapTokens(
+                        newText: rawText, previousTail: previousChunkTailTokens)
+                    dedupMatchLen = trimmed == rawText
+                        ? 0
+                        : (dedupHeadTokens.count -
+                           StatusItemController.leadingTokensWithEnd(
+                               trimmed, upTo: dedupHeadTokens.count).count)
+                    Logger.info("continuous: overlap boundary "
+                        + "prevTail=\(dedupPrevTail) "
+                        + "newHead=\(dedupHeadTokens) "
+                        + "matchLen=\(dedupMatchLen)")
+                    text = trimmed
+                } else {
+                    text = rawText
+                }
+                // Remember trailing tokens of the (possibly dedup'd) raw
+                // text so the next chunk can dedup against them. Also
+                // remember whether this chunk was a max-chunk cut so the
+                // next chunk's handler knows whether to dedup at all.
+                previousChunkTailTokens = StatusItemController.trailingTokens(
+                    text, count: 5)
+                previousChunkWasMaxCut = wasMaxChunkCut
+                let stripMode = prefs.continuousDictationStripWhisperPunctuation
+                var cleaned = StatusItemController.postProcessTranscript(
+                    text, stripPunctuation: stripMode)
+                // Consecutive-duplicate filter, two passes:
+                // 1. Within-chunk: collapse adjacent identical tokens
+                //    separated by whitespace only (not punctuation, which
+                //    indicates deliberate emphasis).
+                // 2. Cross-chunk: if the first word of this chunk exactly
+                //    matches the last word injected in the previous chunk,
+                //    drop it. Catches cases where overlap dedup missed a
+                //    duplicate because whisper rendered the overlapped
+                //    word differently in each chunk.
+                if prefs.transcriptProcessingEnabled
+                    && prefs.filterConsecutiveDuplicates
+                    && !cleaned.isEmpty {
+                    let beforeInner = cleaned
+                    cleaned = StatusItemController.filterConsecutiveDuplicates(cleaned)
+                    if cleaned != beforeInner {
+                        Logger.info("continuous: duplicate filter collapsed within-chunk repeats")
+                    }
+                    if let prev = previousInjectedLastWord,
+                       let (firstWord, firstWordEnd) =
+                            StatusItemController.firstWord(of: cleaned),
+                       firstWord == prev.lowercased() {
+                        let remaining = String(cleaned[firstWordEnd...])
+                            .trimmingCharacters(in: .whitespaces)
+                        Logger.info("continuous: duplicate filter dropped cross-chunk repeat of \(prev)")
+                        cleaned = remaining
                     }
                 }
+                var injectedForDebug = ""
+                let prevInjectedLastWordForDebug = previousInjectedLastWord
+                if !cleaned.isEmpty {
+                    let injected: String
+                    if stripMode {
+                        // Leading-separator policy per IDEAS.md. Each
+                        // chunk is injected immediately when transcribed.
+                        // Sentence-break logic has two mechanisms; they
+                        // coexist regardless of auto-end-period state:
+                        //
+                        // Gap-based: chunk arriving with gap in the
+                        // new-sentence window [P, W] where P =
+                        // pauseSeconds and W = sentencePauseMaxSeconds
+                        // (Window threshold in the UI). Prefix is `". "` +
+                        // capital. Beyond W, a resuming chunk gets `" "`
+                        // continuation. Below P no chunk emits at all,
+                        // so there's no sub-P case to handle here.
+                        //
+                        // Trailing-period timer: when auto-end-period is
+                        // ON, a timer fires after 4P of silence from
+                        // speech-end and injects `.`. Subsequent chunks
+                        // observe `previousInjectedEndedWithSentencePunct`
+                        // and prefix `" "` + capital.
+                        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let prefix: String
+                        // AX query: if the target field's cursor is at a
+                        // line start, treat as fresh start. Returns nil
+                        // when the app doesn't support text AX; fall
+                        // through to the normal logic in that case.
+                        let atLineStart = CursorContext.isCursorAtLineStart()
+                        let gapIsSentenceBreak =
+                            gap >= prefs.continuousDictationPauseSeconds
+                            && gap <= prefs.continuousDictationSentencePauseMaxSeconds
+                        if isFirstContinuousChunk {
+                            prefix = ""
+                            isFirstContinuousChunk = false
+                            cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                        } else if atLineStart == true {
+                            prefix = ""
+                            cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                        } else if previousInjectedEndedWithSentencePunct {
+                            // Prior injection already ended with `.`/`?`/`!`
+                            // (whisper's own, or the trailing-period timer
+                            // firing). Never stack punctuation; always
+                            // capitalize because a new sentence is starting.
+                            prefix = " "
+                            cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                        } else if gapIsSentenceBreak {
+                            prefix = ". "
+                            cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                        } else {
+                            prefix = " "
+                        }
+                        injected = prefix + cleaned
+                        if let last = cleaned.last {
+                            previousInjectedEndedWithSentencePunct =
+                                (last == "?" || last == "!")
+                        } else {
+                            previousInjectedEndedWithSentencePunct = false
+                        }
+                    } else {
+                        // Current / stable behavior: trailing space per chunk.
+                        injected = "\(cleaned) "
+                    }
+                    textInjector.insert(injected)
+                    injectedForDebug = injected
+                    previousInjectedLastWord = StatusItemController.lastWord(of: injected)
+                    if prefs.continuousDictationPromptChainEnabled {
+                        // Feed whisper a non-stripped, fully-punctuated,
+                        // sentence-case form as context, regardless of
+                        // what we injected to the user. The prompt steers
+                        // whisper's language model; richer punctuation
+                        // and capitalization give it stronger signal for
+                        // acoustically-ambiguous word choices (an/and,
+                        // to/too, their/there). Only used for the prompt;
+                        // the user's visible text stays in the chosen
+                        // mode's form.
+                        let promptText: String
+                        if stripMode {
+                            let fullyPunctuated =
+                                StatusItemController.postProcessTranscript(
+                                    text, stripPunctuation: false)
+                            promptText = fullyPunctuated.isEmpty
+                                ? injected
+                                : "\(fullyPunctuated) "
+                        } else {
+                            promptText = injected
+                        }
+                        appendToContinuousPromptBuffer(promptText)
+                    }
+                    // Arm the trailing-period timer. If the user stays
+                    // silent past trailingPeriodSeconds, a `.` is
+                    // appended to close the sentence. Strip mode +
+                    // auto-end-period only; skipped if the chunk already
+                    // ended with sentence-terminating punctuation, and
+                    // skipped if the user is currently still speaking
+                    // (this chunk was a max-chunk force-emit mid-speech,
+                    // not an actual pause).
+                    if stripMode
+                        && prefs.continuousDictationAutoEndPeriod
+                        && !audioRecorder.isSpeaking {
+                        let endsTerminal: Bool
+                        if let last = cleaned.last {
+                            endsTerminal = (last == "." || last == "?" || last == "!")
+                        } else {
+                            endsTerminal = false
+                        }
+                        if !endsTerminal {
+                            scheduleTrailingPeriod()
+                        }
+                    }
+                }
+                writeChunkDebugMetadataIfEnabled(
+                    debugWavURL: debugWavURL,
+                    gap: gap, elapsed: elapsed,
+                    wasMaxChunkCut: wasMaxChunkCut,
+                    rawText: rawText, dedupedText: text,
+                    prevTail: dedupPrevTail,
+                    newHead: dedupHeadTokens,
+                    matchLen: dedupMatchLen,
+                    cleaned: cleaned,
+                    injected: injectedForDebug,
+                    prevInjectedLastWord: prevInjectedLastWordForDebug)
             case .failure(let error):
                 Logger.error("continuous chunk transcription failed",
                              detail: String(format: "%.2fs: %@",
@@ -720,6 +1202,165 @@ final class StatusItemController: NSObject,
             drainingAfterContinuous = false
             setIconState(.idle)
         }
+    }
+
+    // Uppercases the first alphabetic character of the string, leaving
+    // the rest untouched. Used by strip-punctuation mode to re-cap the
+    // leading letter of a chunk that follows a detected sentence pause.
+    private static func capitalizeFirstAlphabetic(_ text: String) -> String {
+        var result = String()
+        result.reserveCapacity(text.count)
+        var capitalized = false
+        for ch in text {
+            if !capitalized && ch >= "a" && ch <= "z" {
+                result.append(String(ch).uppercased())
+                capitalized = true
+            } else {
+                result.append(ch)
+                if ch >= "A" && ch <= "Z" {
+                    capitalized = true
+                }
+            }
+        }
+        return result
+    }
+
+    // Helpers for acoustic-overlap leading-word dedup. A word is a run of
+    // Unicode alphanumerics; non-alphanumerics (whitespace, punctuation,
+    // apostrophes) separate them. Lowercased so case differences across
+    // whisper runs don't block a match.
+
+    private static func isWordChar(_ ch: Character) -> Bool {
+        for scalar in ch.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) { return true }
+        }
+        return false
+    }
+
+    // Returns the last `count` alphanumeric tokens from `text`, lowercased.
+    private static func trailingTokens(_ text: String, count: Int) -> [String] {
+        var tokens: [String] = []
+        var i = text.startIndex
+        while i < text.endIndex {
+            while i < text.endIndex && !isWordChar(text[i]) {
+                i = text.index(after: i)
+            }
+            if i >= text.endIndex { break }
+            let start = i
+            while i < text.endIndex && isWordChar(text[i]) {
+                i = text.index(after: i)
+            }
+            tokens.append(String(text[start..<i]).lowercased())
+        }
+        return Array(tokens.suffix(count))
+    }
+
+    // Leading alphanumeric tokens from `text`, lowercased, with the end
+    // index of each token in the original string so the caller can drop
+    // text up to a chosen cut point.
+    private static func leadingTokensWithEnd(
+        _ text: String, upTo limit: Int) -> [(String, String.Index)] {
+        var out: [(String, String.Index)] = []
+        var i = text.startIndex
+        while i < text.endIndex && out.count < limit {
+            while i < text.endIndex && !isWordChar(text[i]) {
+                i = text.index(after: i)
+            }
+            if i >= text.endIndex { break }
+            let start = i
+            while i < text.endIndex && isWordChar(text[i]) {
+                i = text.index(after: i)
+            }
+            out.append((String(text[start..<i]).lowercased(), i))
+        }
+        return out
+    }
+
+    // Drops the second of any adjacent identical word tokens, where
+    // "adjacent" means separated by whitespace only (no intervening
+    // punctuation). Comparison is case-insensitive, punctuation-insensitive,
+    // on alphanumeric runs. Handles arbitrarily long runs ("no no no" →
+    // "no"). Preserves inter-word non-whitespace content, so "very, very
+    // good" is left intact: the comma indicates deliberate emphasis.
+    static func filterConsecutiveDuplicates(_ text: String) -> String {
+        var result = String()
+        result.reserveCapacity(text.count)
+        var lastWord: String? = nil
+        var i = text.startIndex
+        while i < text.endIndex {
+            let sepStart = i
+            while i < text.endIndex && !isWordChar(text[i]) {
+                i = text.index(after: i)
+            }
+            let separator = String(text[sepStart..<i])
+            if i >= text.endIndex {
+                result.append(separator)
+                break
+            }
+            let wordStart = i
+            while i < text.endIndex && isWordChar(text[i]) {
+                i = text.index(after: i)
+            }
+            let word = String(text[wordStart..<i])
+            let sepIsWhitespaceOnly = !separator.isEmpty
+                && separator.allSatisfy { $0 == " " || $0 == "\t" || $0 == "\n" }
+            if let prev = lastWord,
+               sepIsWhitespaceOnly,
+               prev.lowercased() == word.lowercased() {
+                // Drop this word AND its separator. Keep lastWord unchanged
+                // so a third consecutive copy is also dropped.
+                continue
+            }
+            result.append(separator)
+            result.append(word)
+            lastWord = word
+        }
+        return result
+    }
+
+    // Returns the first alphanumeric word of `text`, lowercased, along
+    // with the end index just past it. Nil if no word is present.
+    private static func firstWord(of text: String) -> (String, String.Index)? {
+        var i = text.startIndex
+        while i < text.endIndex && !isWordChar(text[i]) {
+            i = text.index(after: i)
+        }
+        if i >= text.endIndex { return nil }
+        let start = i
+        while i < text.endIndex && isWordChar(text[i]) {
+            i = text.index(after: i)
+        }
+        return (String(text[start..<i]).lowercased(), i)
+    }
+
+    // Returns the last alphanumeric word of `text`, lowercased.
+    private static func lastWord(of text: String) -> String? {
+        let tokens = trailingTokens(text, count: 1)
+        return tokens.last
+    }
+
+    // If the leading tokens of `newText` match a suffix of `previousTail`,
+    // drop the matching leading portion from `newText`. Prefers the
+    // longest match. No change if no match is found; accepting an
+    // occasional duplicate is safer than silently chopping real words.
+    static func dedupeOverlapTokens(newText: String,
+                                    previousTail: [String]) -> String {
+        if previousTail.isEmpty { return newText }
+        let headWithEnds = leadingTokensWithEnd(newText, upTo: previousTail.count)
+        if headWithEnds.isEmpty { return newText }
+        let head = headWithEnds.map { $0.0 }
+        let maxMatch = min(head.count, previousTail.count)
+        var matchLen = 0
+        for L in stride(from: maxMatch, through: 1, by: -1) {
+            if Array(head.prefix(L)) == Array(previousTail.suffix(L)) {
+                matchLen = L
+                break
+            }
+        }
+        if matchLen == 0 { return newText }
+        let dropEnd = headWithEnds[matchLen - 1].1
+        let remaining = String(newText[dropEnd...])
+        return remaining.trimmingCharacters(in: .whitespaces)
     }
 
     private func preflightBackend() -> String? {
@@ -803,9 +1444,40 @@ final class StatusItemController: NSObject,
                 case .success(let text):
                     Logger.info(String(format: "transcript (%.2fs): %@", elapsed, text))
                     self?.setIconState(.idle)
-                    let cleaned = StatusItemController.postProcessTranscript(text)
+                    var cleaned = StatusItemController.postProcessTranscript(text)
                     if !cleaned.isEmpty {
-                        self?.textInjector.insert(cleaned)
+                        // Strip any trailing period whisper itself added. The
+                        // Auto trailing period checkbox + its seconds field
+                        // together are what govern whether a period appears
+                        // and how long after injection it arrives. Preserving
+                        // whisper's period would short-circuit the timer and
+                        // let the period appear instantly in "Auto trailing
+                        // period on" sessions, defeating the configured delay.
+                        // Intra-sentence periods stay (so "I went to store.
+                        // Then home" reads correctly) and trailing ? or ! stay
+                        // (intonation-driven; losing them would change meaning
+                        // and they're not what the timer is meant to add).
+                        while cleaned.last == "." {
+                            cleaned.removeLast()
+                        }
+                        cleaned = cleaned.trimmingCharacters(in: .whitespaces)
+                        // Capitalize the first letter when the cursor is at a
+                        // line start (fresh field, or immediately after a
+                        // newline the user typed). When the cursor is mid-line
+                        // the dictated text is being inserted into an existing
+                        // sentence; keep it lowercase. On AX query failure
+                        // (nil), default to capitalizing: dictation usually
+                        // starts a new thought.
+                        if Preferences.shared.capitalizeFirstLetterAtLineStart {
+                            let atLineStart = CursorContext.isCursorAtLineStart()
+                            if atLineStart != false {
+                                cleaned = StatusItemController.capitalizeFirstAlphabetic(cleaned)
+                            }
+                        }
+                        if !cleaned.isEmpty {
+                            self?.textInjector.insert(cleaned)
+                            self?.scheduleStandardTrailingPeriodIfNeeded(for: cleaned)
+                        }
                     }
                 case .failure(let error):
                     let backend = Preferences.shared.backend
@@ -1029,7 +1701,7 @@ final class StatusItemController: NSObject,
     }
 
     @objc private func openAbout() {
-        AboutWindowController.shared.show()
+        presentAboutTab(startUpdateCheck: false)
     }
 
     @objc private func openHelp() {
@@ -1037,32 +1709,38 @@ final class StatusItemController: NSObject,
     }
 
     @objc private func checkForUpdates() {
-        UpdateCheckWindowController.present(
-            onResult: { [weak self] result in
-                guard let self = self else { return }
-                let skipped = Preferences.shared.skippedUpdateVersion
-                switch result {
-                case .updateAvailable(_, let latest, _):
-                    self.pendingUpdateVersion = (latest == skipped) ? nil : latest
-                case .upToDate:
-                    self.pendingUpdateVersion = nil
-                    if !skipped.isEmpty {
-                        Preferences.shared.skippedUpdateVersion = ""
-                    }
-                case .error:
-                    break
-                }
-                self.refreshUpdatesMenuItem()
-                self.refreshMenuBarIcon()
-            },
-            onSkip: { [weak self] latest in
-                guard let self = self else { return }
-                Preferences.shared.skippedUpdateVersion = latest
+        presentAboutTab(startUpdateCheck: true)
+    }
+
+    private func presentAboutTab(startUpdateCheck: Bool) {
+        let controller = PreferencesWindowController.shared
+        controller.onHotkeyChanged = { [weak self] in self?.applyHotkeySettings() }
+        controller.onColoredIconChanged = { [weak self] in self?.refreshMenuBarIcon() }
+        controller.onUpdateCheckResult = { [weak self] result in
+            guard let self = self else { return }
+            let skipped = Preferences.shared.skippedUpdateVersion
+            switch result {
+            case .updateAvailable(_, let latest, _, _):
+                self.pendingUpdateVersion = (latest == skipped) ? nil : latest
+            case .upToDate:
                 self.pendingUpdateVersion = nil
-                self.refreshUpdatesMenuItem()
-                self.refreshMenuBarIcon()
+                if !skipped.isEmpty {
+                    Preferences.shared.skippedUpdateVersion = ""
+                }
+            case .error:
+                break
             }
-        )
+            self.refreshUpdatesMenuItem()
+            self.refreshMenuBarIcon()
+        }
+        controller.onUpdateSkipped = { [weak self] latest in
+            guard let self = self else { return }
+            Preferences.shared.skippedUpdateVersion = latest
+            self.pendingUpdateVersion = nil
+            self.refreshUpdatesMenuItem()
+            self.refreshMenuBarIcon()
+        }
+        controller.showAbout(startUpdateCheck: startUpdateCheck)
     }
 
     private func refreshUpdatesMenuItem() {

@@ -2,6 +2,23 @@
 
 Directives for working on this repo. Scope, and work history, are in `DEVLOG.md`, and `README.md`. `claude.local.md` has secrets only you need to know
 
+## Clear and concise
+
+Applies to every output surface: chat replies, UI strings, help popovers, code comments, documentation, commit messages. Overrides any writing instinct that conflicts.
+
+- State what a thing is. Do not editorialize about it.
+- No comparative language. Not "faster", "more accurate", "better", "cleaner", "simpler".
+- No recommendations. Not "start with X", "if you're not sure, Y", "we suggest Z".
+- No selling points. Not "for the extra accuracy", "to catch the current topic", "so you don't wait forever".
+- No value judgments. Describe tradeoffs as facts, not as better or worse.
+- No narrative framing. Not "the industry moved", "historically", "this used to be a problem".
+
+**Clear** = unambiguous. Each sentence says one thing. Plain words. Does not require the reader to infer intent.
+
+**Concise** = no words that aren't carrying information. A sentence whose removal doesn't change what the reader knows should not exist. Shorter is not the goal; unnecessary is the failure.
+
+Before shipping any text (commit message, help popover, chat answer, code comment, docs entry): scan each sentence and ask "does its removal change what the reader knows?" If no, delete it.
+
 ## Writing style
 
 Applies to all project docs (CLAUDE.md, README.md, DEVLOG.md, THIRD_PARTY_NOTICES.md, in-repo notes, commit messages). Applies to any new documentation added later.
@@ -20,7 +37,7 @@ Applies to all project docs (CLAUDE.md, README.md, DEVLOG.md, THIRD_PARTY_NOTICE
 
 ## Build
 
-- Xcode 10.1. Swift 4.2. Deployment target 10.13.
+- Xcode 10.1. Swift 4.2. Deployment target 10.11 (El Capitan).
 - AppKit, menu-bar only. `LSUIElement = YES` in `Info.plist`.
 - Source layout: `App/`, `Core/`, `Transcribers/`, `Prefs/`, `icons/`.
 - whisper.cpp: pinned to v1.7.2. Build `whisper-cli` for x86_64 via `scripts/setup.sh`. Models bundled in `.app/Contents/Resources/`; writable fallback is `~/Library/Application Support/push-to-dictate/models/`.
@@ -40,7 +57,7 @@ CRITICAL. The compiler is Swift 4.2 on Xcode 10.1. Swift 5 APIs do not exist her
 
 The compiler message for these is usually "unable to infer closure type in the current context" or "value of type 'Character' has no member 'X'". Both are tell-tale signs of a Swift 5 API slipping into 4.2 code.
 
-Also unavailable at the deployment target even when the compiler would allow it: `async/await` (Swift 5.5), `actor` (5.5), `@MainActor` (5.5), `Combine` (10.15+), `SwiftUI` (10.15+), `OSLog` 10.14+ APIs.
+Also unavailable at the deployment target (10.11) even when the compiler would allow it: `async/await` (Swift 5.5), `actor` (5.5), `@MainActor` (5.5), `Combine` (10.15+), `SwiftUI` (10.15+), `OSLog` 10.14+ APIs, `UNUserNotificationCenter` (10.14+), `effectiveAppearance` dark-mode detection (10.14+), `NSApp.appearance` modern dark-mode (10.14+). 10.14+ features that are actually needed must be wrapped in `#available(macOS 10.14, *)` with a 10.11-compatible fallback path (see `StatusItemController.showError` and dark-mode icon selection as the pattern).
 
 ## UI copy
 
@@ -110,7 +127,7 @@ Release cutting:
 - Tag the release commit with the CalVer version prefixed with `v`.
 - Branch `release/vN.M` from that tag.
 - Push the tag and the branch to `origin`.
-- Build the Release archive from the tagged commit, zip as `Push-to-Dictate-v<CalVer>-Full.zip` (asset filename carries `-Full` to mark it as the complete bundle, reserving naming space for possible partial-asset variants like `-Patch`), attach to the existing `v<CalVer>` tag's new GitHub release.
+- Build the Release archive from the tagged commit, zip as `Push-to-Dictate-v<CalVer>-Full.zip` (asset filename carries `-Full` to distinguish it from GitHub's auto-generated source-code zips; the updater matches on this suffix), attach to the existing `v<CalVer>` tag's new GitHub release.
 - On `main`, immediately bump `CFBundleShortVersionString` to the next anticipated CalVer and `PQDisplayVersion` to the next SemVer so in-development builds identify as newer than the shipped release.
 
 Backport flow:
@@ -142,4 +159,4 @@ Local workspace:
 - Host: Mac Pro 5,1. macOS 10.13.6. Xcode 10.1 primary, 9.4.1 available.
 - Swift 4.2 ceiling. No async/await, no Swift 5 runtime.
 - whisper.cpp Swift package targets modern SPM. Unusable at this Swift ceiling. Use C API via bridging header, or shell out to `whisper-cli`.
-- Mic permission dialog does not exist on 10.13. Input Monitoring permission does not exist on 10.13. Accessibility permission does: required for `CGEventTap` and synthetic keystrokes.
+- Mic permission dialog does not exist on 10.11-10.13. Input Monitoring permission does not exist on 10.11-10.13. Accessibility permission does: required for `CGEventTap` and synthetic keystrokes.

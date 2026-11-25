@@ -2,7 +2,8 @@ import Foundation
 
 enum UpdateCheckResult {
     case upToDate(current: String)
-    case updateAvailable(current: String, latest: String, releaseURL: URL)
+    case updateAvailable(current: String, latest: String,
+                         releaseURL: URL, downloadURL: URL?)
     case error(String)
 }
 
@@ -32,7 +33,8 @@ enum UpdateChecker {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 completion(.updateAvailable(current: current,
                                             latest: simulatedLatestVersion,
-                                            releaseURL: releasesPageURL))
+                                            releaseURL: releasesPageURL,
+                                            downloadURL: nil))
             }
             return
         }
@@ -76,13 +78,31 @@ enum UpdateChecker {
         }
 
         let latest = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+        let downloadURL = pickFullAssetURL(from: dict["assets"])
 
         switch compareVersions(latest, current) {
         case .orderedDescending:
-            return .updateAvailable(current: current, latest: latest, releaseURL: htmlURL)
+            return .updateAvailable(current: current, latest: latest,
+                                    releaseURL: htmlURL, downloadURL: downloadURL)
         case .orderedSame, .orderedAscending:
             return .upToDate(current: current)
         }
+    }
+
+    // Pick the single asset whose filename ends with "-Full.zip". Zero or
+    // multiple matches return nil; caller falls back to Open Release Page.
+    private static func pickFullAssetURL(from assets: Any?) -> URL? {
+        guard let array = assets as? [[String: Any]] else { return nil }
+        let matches = array.filter {
+            if let name = $0["name"] as? String {
+                return name.hasSuffix("-Full.zip")
+            }
+            return false
+        }
+        guard matches.count == 1 else { return nil }
+        guard let urlString = matches[0]["browser_download_url"] as? String,
+              let url = URL(string: urlString) else { return nil }
+        return url
     }
 
     // Component-wise integer compare of dot-separated CalVer strings.

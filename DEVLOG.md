@@ -1053,3 +1053,368 @@ UI in the Audio pane, below Max chunk:
 Both keys added to `allUserDefaultsKeys` so Reset to Defaults clears them.
 
 After the reset: the button handler also invokes `onHotkeyChanged`/`onColoredIconChanged` callbacks on the controller so the status-bar icon and menu re-pick up the fresh defaults (hotkey binding, colored vs monochrome icon) alongside the Preferences UI re-rendering via `refreshAll`.
+
+### 2026-11-17 — Experimental: strip-punctuation continuous mode with pause-driven sentences
+
+Branch: `experiment/pause-driven-sentences`. All behavior changes are gated behind a new `continuousDictationStripWhisperPunctuation` preference (default `false`), so existing continuous-mode behavior is preserved unless the user opts in.
+
+#### Design
+
+Treat whisper's punctuation and capitalization output on short chunks as unreliable. Strip sentence-ending periods, lowercase everything, drive sentence-break decisions from measured silence gaps between chunks rather than from whisper's internal guesses. Insert `". "` + capitalize at a user-tunable sentence-pause window; plain `" "` otherwise. Each chunk is injected immediately when transcribed (no staging, no cross-chunk delay) so continuous mode stays actually continuous.
+
+#### `postProcessTranscript` strip mode
+
+New `stripPunctuation: Bool` parameter. When true:
+
+- Strip sentence-ending periods matching `\.+(?=\s|$)`. Periods inside words (`whisper.cpp`, `Node.js`, `D.C.` mid-sentence) are preserved; only periods followed by whitespace or end-of-string get replaced with a space.
+- `normalizeCasing` is called with `capitalizeAtSentenceStarts: false`. It lowercases everything except the alpha character immediately following `?` or `!`, which keeps whisper's original case. This preserves legitimate sentence-break capitals whisper emits on intonation that the pause-driven policy can't reconstruct.
+
+#### Leading angle-bracket artifact strip
+
+Added `^\s*>+\s*` to the per-chunk strip patterns alongside existing bracket/paren removal. Whisper emits `>> ` prefixes on silent or near-silent chunks (seen alongside `[silence]` tokens).
+
+#### `AudioRecorder` gap telemetry
+
+`onChunkBoundary` signature extended from `([Float]) -> Void` to `([Float], TimeInterval) -> Void`. Two new internal timestamps (`previousChunkLastSpeechAt`, `currentChunkFirstSpeechAt`) record when the previous chunk's last speech-level sample fell and when the current chunk's first speech sample arrived. Their difference is the preceding gap, passed through on each emit. Gap is 0 for the first chunk of a session and for final-tail chunks enqueued via `setRecording(false)`.
+
+#### Session ID for stale-chunk drop
+
+New `currentContinuousSessionId: Int` monotonic counter, incremented on each session start. `enqueueContinuousChunk` captures the ID at enqueue time; `handleContinuousResult` checks it against the current ID. Chunks from a prior session are dropped with a log line rather than injected. Prevents late-arriving chunks from corrupting the new session's first-chunk state when the user stops and immediately restarts continuous mode.
+
+#### Leading-separator policy in `handleContinuousResult`
+
+Strip-mode branch applies a prefix to each chunk's cleaned text based on the measured preceding gap:
+
+- First chunk of session: `""` prefix, capitalize first letter.
+- `CursorContext.isCursorAtLineStart()` returns `true`: `""` prefix, capitalize first letter.
+- Gap in `[continuousDictationSentencePauseSeconds, continuousDictationSentencePauseMaxSeconds]`: `". "` prefix (or `" "` if the previously injected chunk ended with `?` or `!`), capitalize first letter.
+- Otherwise: `" "` prefix, no capitalization change.
+
+Nothing is injected with a trailing separator in strip mode. State tracked across chunks: `isFirstContinuousChunk`, `previousInjectedEndedWithSentencePunct`.
+
+#### `CursorContext` via Accessibility API
+
+New file `Core/CursorContext.swift`. Queries `AXUIElementCreateSystemWide()` → `kAXFocusedUIElementAttribute` → `kAXSelectedTextRangeAttribute` and `kAXValueAttribute` to determine whether the cursor in the focused text control is at a line start (position 0, or immediately after `\n`, `\r`, U+2028, or U+2029). Returns `Bool?`: `true` or `false` when AX answered, `nil` when any step failed (no focused element, element isn't a text container, value isn't a string, cursor range not available).
+
+Used in strip mode to force a fresh-start prefix (`""` + capitalize) when the cursor is on a new line after the user pressed Enter mid-session. Uses the existing Accessibility permission granted for the hotkey event tap. Not every app supports AX text access; the `nil` return falls through to the normal gap-based logic so the feature is additive.
+
+#### New preferences
+
+- `continuousDictationStripWhisperPunctuation: Bool` (default `false`): master switch for the strip-mode behavior. When off, continuous mode uses the existing trailing-space injection path.
+- `continuousDictationSentencePauseSeconds: Double` (default `1.0`): lower bound of the sentence-break window. Range gated above `continuousDictationPauseSeconds`, below the max field, capped at `5.0`.
+- `continuousDictationSentencePauseMaxSeconds: Double` (default `2.0`): upper bound. Range gated above the min field, capped at `10.0`. Gaps longer than this are treated as think-pauses, not sentence breaks.
+
+All three added to `allUserDefaultsKeys` so `Reset to Defaults` clears them.
+
+UI: three new rows in the Audio pane under the existing Max chars field: `Strip punctuation:` checkbox, `Sentence pause min:` and `Sentence pause max:` numeric fields with inline validation (red text on out-of-range, revert-to-pref on blur).
+
+#### Fixup list expansion
+
+Significant additions to `defaultCapitalizationFixups` for geographic and personal-name coverage:
+
+- Canada: all 10 provinces, all 10 provincial capitals (Edmonton, Victoria, Winnipeg, Fredericton, St. John's, Halifax, Charlottetown, Quebec City, Regina, Toronto), plus Vancouver, Calgary, Ottawa.
+- United States: all 50 states, all 50 state capitals (Saint Paul, St. Paul, Jefferson City, Carson City, Oklahoma City, Salt Lake City, etc.), plus America, United States, D.C., D.C, DC.
+- Personal names: Michael, Andy, Dylan, Raymond, Johnson, Jonathan, Derek, Emily, Sarah, Bill, Curtis, Curtiss, Billy, Holly, Laura, Andrew, Tyson, Jenny, Jennifer, Maria, Jane, Marie, Sean, Shawn, Ron, Ronald, Esther, Leo, Leonardo, Leon, Nadia, Larry, Michelle, Matt, Matthew.
+
+New `defaultTextSubstitutions` entries for canonical forms whose embedded period strip mode removes: `("st john's", "St. John's")` and `("st paul", "St. Paul")`.
+
+#### Prompt chain feeds non-stripped form (post-commit refinement)
+
+Observed on testing: in strip mode, whisper's acoustic disambiguation on close word pairs like `an`/`and`, `to`/`too`, `their`/`there` was slipping in cases where it had been correct under non-strip mode. Root cause: the prompt buffer was accumulating the injected (stripped, lowercase) form, so whisper's decoder was reading context like `"i'll be going for about 6 days and should be back on the 21st"` instead of `"I'll be going for about 6 days and should be back on the 21st."`. Mid-chunk periods and sentence-start capitals were being removed from the prompt before whisper ever saw them.
+
+Fix: when strip mode is on, compute a second post-process pass of the raw chunk text with `stripPunctuation: false` and feed that fully-punctuated sentence-case form to `appendToContinuousPromptBuffer`. The user's visible injection still uses the stripped form; only the prompt buffer sees the rich form. Non-strip mode is unchanged (prompt and injection are identical there). Doubles the per-chunk post-process cost in strip mode, which is negligible at these string sizes.
+
+#### `AudioRecorder` max-chunk timer and buffer reset on speech-begin
+
+Lowering `continuousDictationMaxChunkSeconds` to small values (10 s or less) caused whisper to hallucinate heavily and mis-transcribe. Root cause: both `chunkSampleCount` and the audio `buffer` were accumulating from the moment a chunk slot opened (session start or previous emit), regardless of whether any speech had occurred yet. The max-chunk emit was correctly gated on `chunkHasSpeech`, but by the time speech actually arrived, the counter was already loaded with however much pre-speech silence had piled up. At max-chunk=10 s, a 20 s pre-speech silence followed by any speech triggered an immediate emit containing mostly silence; whisper then invented words to fit the audio.
+
+Fix in `AudioRecorder.handleInputBuffer`: when the audio level crosses `chunkBoundaryThreshold` on a chunk with `chunkHasSpeech == false` (the speech-begin transition), reset `chunkSampleCount = 0` synchronously and queue a `bufferQueue.async { buffer.removeAll(keepingCapacity: true) }`. The current pcm callback's samples are still appended via the subsequent `bufferQueue.async` further down in the function; because `bufferQueue` is serial, the clear runs before the append, so the first speech samples are preserved and only the preceding silence is discarded. Preceding-gap timestamps (`previousChunkLastSpeechAt`, `currentChunkFirstSpeechAt`) are untouched; gap still measures silence duration between chunks correctly.
+
+Effects:
+
+- `max_chunk` now measures speech-time (plus within-speech micro-pauses up to the boundary threshold), not wall-clock-from-chunk-slot-start.
+- Low `max_chunk` values (10 s) are usable without hallucinations.
+- Each emitted chunk starts at the first speech sample; whisper no longer sees long leading silence.
+
+#### Sentence timing consolidation and auto-close toggle (post-commit refinement)
+
+The three timing preferences introduced with the strip-punctuation branch collapsed into a single master knob. Only `continuousDictationSentencePauseSeconds` (default `1.0`) remains; `continuousDictationSentencePauseMaxSeconds` and `continuousDictationTrailingPeriodSeconds` were removed. The derived values live in code as `P * 2` (window close) and `P * 4` (trailing-period threshold).
+
+Timing model (P = `sentencePauseSeconds`):
+
+- Gap in `[P, 2P]`: `". "` prefix + capitalize. Natural sentence pause.
+- Gap outside the window: `" "` continuation.
+- Silence ≥ `4P` from speech-end with no new chunk: trailing-period timer fires, injects `.`.
+
+New preference `continuousDictationAutoEndPeriod: Bool` (default `true`) governs whether the trailing-period timer fires at all. Both states of the toggle use the same gap-based `[P, 2P]` window for mid-dictation sentence breaks; only the end-of-dictation closing period is toggle-gated.
+
+`AudioRecorder.onSpeechBegin: (() -> Void)?` added. Fires on the speech-begin transition inside `handleInputBuffer` (same point as the buffer and `chunkSampleCount` reset). `StatusItemController` wires it in `configureChunkBoundary` to cancel the pending trailing-period `DispatchWorkItem` the moment speech resumes, rather than waiting for the next chunk to finish transcribing. Without this, the period could plant itself mid-resumption because the timer was counting wall-clock from the previous injection, not from the actual last speech sample.
+
+`AudioRecorder.isSpeaking: Bool` computed property exposes `chunkHasSpeech`. Checked before arming the trailing-period timer in `scheduleTrailingPeriod`'s caller: if the user is currently in active speech, don't schedule. Handles the max-chunk force-emit case where a chunk is emitted at the duration cap while the user is still speaking continuously; no speech-end has actually occurred, so there's no "trailing" silence to count.
+
+UI collapse in the Audio pane: `Sentence pause min:` and `Sentence pause max:` rows removed. Replaced by one `Sentence pause:` row and an `Auto-close:` checkbox (checkbox title: `Append period to close the final sentence after silence`). Field range gated at `(continuousDictationPauseSeconds, 5.0]`. The hint line under the field renders live as `seconds · default 1.0 · new-sentence window [P, 2P] · trailing period at 4P` with numeric substitution so the user sees the derived values as they adjust the knob.
+
+#### System default input device resolution
+
+`AudioRecorder.applyPreferredInputDevice` previously short-circuited when `Preferences.inputDeviceUID` was empty (the "Default" case), on the assumption that `AVAudioEngine.inputNode` would follow the system default input. It doesn't: the input node retains whatever device was last pinned on its audio unit via `kAudioOutputUnitProperty_CurrentDevice`. After the user picked a specific device once, switching back to "Default" in Preferences left the previously-pinned device stuck. The engine also doesn't follow a System Preferences default-input change made mid-process.
+
+Fix: when the UID is empty, actively resolve the current system default via `AudioObjectGetPropertyData` with `kAudioHardwarePropertyDefaultInputDevice`, then set it on the input node's audio unit using the same path as the explicit-UID branch. New private helper `systemDefaultInputDeviceID() -> AudioDeviceID?`. "Default" now means "the current system default at the moment `start()` is called," which matches what the UI label implies.
+
+#### Preferences window layout revamp (sectioned v2)
+
+Restructured all preference panes to a grouped-section layout matching the v2 mockups. Sidebar categories reduced from six to five (`General, Audio, Transcription, Output, Advanced`); the standalone `Interface` pane is gone and its colored-icon checkbox moved into `General → Appearance`.
+
+Content moves between panes:
+
+- `Continuous dictation` checkbox, `Pause`, `Max chunk`, `Prompt chain`, `Max chars`, `Strip Whisper punctuation`: moved from `Audio` to `Transcription → Behavior`.
+- `Auto-close` and sentence-handling fields: moved from `Audio` to `Output → Sentence Handling`.
+- `Colored menu bar icon`: moved from `Interface` to `General → Appearance`.
+- `Backup` (Export / Import) rows now live in `General → Settings`.
+
+New layout primitives in `PreferencesWindowController.swift`:
+
+- `FlippedView` (private final NSView subclass, `isFlipped = true`). Used as the pane root and as each section's rounded container so chained top-down autolayout constraints produce top-aligned content when the pane is hosted inside an NSScrollView's non-flipped clip view. Without this, documentView content lands at the bottom of the visible area and is unreachable until scrolled. Declared at file scope above `PreferencesWindowController` to keep Xcode's indexer happy with the forward reference from the pane builders.
+- `buildSection(title:rows:)` returns a composite view with a bold `NSTextField` header above a rounded, filled "box". The box is a layer-backed `FlippedView` with `wantsLayer = true`, `layer.backgroundColor = NSColor(white: 0, alpha: 0.05).cgColor`, `layer.cornerRadius = 8`. Rows stack vertically via explicit anchor chaining from the box's `topAnchor` through each row to `bottomAnchor`. Earlier attempts used `NSBox` with a custom `NSStackView` as `contentView` but the box failed to derive a height from the stack view's intrinsic size and rendered as zero-height, hiding all content.
+- `placeSection(_:in:below:topConstant:)` pins a section into a pane with leading / trailing `paneInset` and anchors the section vertically below a given top anchor. Returns the section's bottom anchor for chaining. Mirrors the existing `placeRow` / `placeRowWithLabel` pattern.
+- `makeSectionHeader(_:)` returns a bold-font `NSTextField` for section titles.
+- `makeCaption(_:)` returns a small secondary-label `NSTextField` used under checkboxes and buttons (e.g. "Toggle mode only", "Toggle mode only · experimental", "Restores all preferences to their original values.", and the `Output → Notes` informational paragraph).
+- `makeHint(_:)` returns the small inline hint text that sits to the right of numeric fields (`seconds · default 0.5`, etc.).
+- `buildLabeledRow(labelText:control:labelWidth:)` is a variant of the existing `buildRowView` that also returns the label view so numeric-field validation can toggle the label's text color on invalid input.
+
+Each pane is now wrapped in an `NSScrollView` inside `contentContainer` so panes taller than the window (Transcription especially, with the Behavior section's six rows) remain reachable. The pane's width is pinned to the scroll view's clip-view width; height grows freely with content. Default window size bumped from 680×420 to 720×560; minimum from 600×340 to 640×420.
+
+Checkbox titles shortened and the long "(Toggle mode only)" / "(experimental)" parentheticals moved into their own captions beneath the checkbox: `silenceAutoStopCheckbox`, `continuousDictationCheckbox`, and `coloredIconCheckbox` were all trimmed.
+
+Conditional row visibility: the Backend section's rows (Local model row vs OpenAI API key row) toggle individually based on the selected backend via the existing `transcriptionModelRow` and `transcriptionApiKeyRow` references. The entire Models Folder section is now hidden when backend is OpenAI via a new `transcriptionModelsFolderSection` reference captured during layout.
+
+#### Sentence handling: three-knob timing with cascade
+
+Replaced the single sentence-pause knob with three independently-persisted preferences, matching the natural "first silence → new-sentence window → closing period" progression:
+
+- `continuousDictationSentencePauseSeconds` (default `1.0`): opens the new-sentence window.
+- `continuousDictationSentencePauseMaxSeconds` (default `2.0`): closes the window; longer gaps fall into the dead zone and resuming chunks get `" "` continuation instead of `". "` + capital.
+- `continuousDictationTrailingPeriodSeconds` (default `4.0`): silence from speech-end that triggers injection of a closing `.` when auto-end-period is on.
+
+`StatusItemController` reads all three directly. The earlier `P × 2` / `P × 4` derivation is gone.
+
+Each field has its own stepper and typed input in `Output → Sentence Handling`. Validation chain enforces `chunkPause < sentencePause < windowClose < trailingPeriod`; each field independently rejects values that break the chain with the one directly above it.
+
+Editing the sentence-pause field cascades to the other two via `applyCascadingSentencePause(_:)`: computes `scale = newP / oldP`, multiplies the stored window-close and trailing-period values by that scale, writes both back to prefs and UI. Preserves the user's current ratio rather than forcing a fixed `2×` / `4×` relationship. Each dependent is still clamped to its floor (`newP + 0.1` for window-close, `newMax + 0.1` for trailing-period) so the ordering invariant always holds. Editing window-close or trailing-period directly updates just that one; no cascade back to sentence-pause.
+
+#### Numeric field validation: color on change, commit on end-editing
+
+Reworked the delegate handling for numeric preference fields. Previously `controlTextDidChange` ran the full validate-and-write-to-prefs path on every keystroke; the sentence-pause field's cascade (`applyCascadingSentencePause`) wrote back to the field's `stringValue`, clobbering the user's in-progress edit and making it impossible to type values like `1.2` from an existing `1.0` (the intermediate `1.` or the deletion of the trailing `0` triggered a rewrite).
+
+New split in `PreferencesWindowController.swift`:
+
+- `controlTextDidChange` calls only `markNumericFieldValidity(_:)`, which looks up the paired label from the field reference and sets the text / label color red or normal based on `numericFieldIsValid(_:)`. No pref writes, no stepper sync, no stringValue mutation.
+- `controlTextDidEndEditing` (fires on Enter, Tab, or focus loss) is the commit point: if valid, calls `validateNumericField(_:)` which writes to prefs, syncs the stepper, and runs the cascade for sentence-pause; if invalid, beeps and reverts to the stored pref via `revertNumericFieldToPref(_:)`.
+
+Visual feedback (red text while typing an out-of-range value) is preserved. Writes to prefs happen exactly once per commit instead of per keystroke.
+
+#### Asterisk-delimited whisper annotations
+
+Whisper emits a second annotation style on near-silent or non-speech chunks that the bracket / paren strip patterns don't catch: asterisk-delimited markers like `*cough*`, `*laughs*`, `*sighs*`, `*music playing*`. These were slipping through into injected output.
+
+Added a third regex to the `postProcessTranscript` strip patterns: `\\*[^*]*\\*`. Matches a `*`, any run of non-`*` characters, and a closing `*`. After the strip the leftover is empty, so the existing `hasContent` check (requires at least one alphanumeric) drops the chunk before injection. No new preference; the strip is unconditional alongside the existing bracket and paren patterns.
+
+#### Capitalization rewrite: regex replaces state machine
+
+Replaced the `normalizeCasing` character-by-character scanner with a single regex pass. Rule: lowercase any `[A-Z]` not preceded by `[.!?]\s`. Whisper-emitted sentence-start capitals (`. H`, `? H`, `! H`) are preserved; mid-sentence capitals that whisper introduced are folded to lowercase (`applyCapitalizationFixups` then re-raises known proper nouns).
+
+Removes the `capitalizeAtSentenceStarts` parameter and the bug where an already-uppercase first letter from whisper's output was always lowercased by the fallback branch. One behavior now serves both strip and non-strip modes. In strip mode the caller strips sentence-ending periods before `normalizeCasing` runs, so the regex has no `. ` anchors left and collapses to "lowercase everything"; chunk-join logic still re-capitalizes at boundaries as before.
+
+Standalone pronoun `i` and its contractions (`i'll`, `i've`, `i'm`, `i'd`) are re-uppercased by the same post-pass as before.
+
+#### Standard-mode trailing period parity
+
+Auto trailing period and its seconds field now govern standard (non-continuous) dictation, not just continuous. Previously the checkbox was continuous-only and whisper's trailing period landed instantly in standard mode regardless of the setting.
+
+New behavior in `transcribe(samples:)` after `postProcessTranscript` returns:
+
+- Trailing `.` characters are stripped unconditionally so the final character is controlled by the checkbox, not by whisper. Intra-sentence periods and trailing `?` / `!` are preserved.
+- `CursorContext.isCursorAtLineStart()` is queried. On `true` or `nil` (AX query failed), the first alphabetic character is uppercased. On explicit `false`, it stays lowercase so inline mid-sentence dictation doesn't produce a stray capital.
+- If the checkbox is on and the final character isn't `?` / `!`, `scheduleStandardTrailingPeriodIfNeeded(for:)` schedules a wall-clock `DispatchWorkItem` for the configured seconds. Fires at the cursor with `.`. Timer uses the shared `trailingPeriodWorkItem` field so the existing cancel site in `setRecording(true)` (line 429) covers both modes: pressing the hotkey during the window cancels the pending period, same as continuous.
+
+Preferences this reuses: `continuousDictationAutoEndPeriod` and `continuousDictationTrailingPeriodSeconds`. Storage keys unchanged despite the broader scope; renaming them would strand existing users' values.
+
+#### Preferences UI reorganization
+
+**Scope move: continuous-dictation controls into one tab.** `Sentence pause` and `Window close` (renamed `Window threshold`) moved from Output → Transcription Behavior. The whole continuous-dictation feature now lives in one place; Output tab keeps only cross-mode settings.
+
+**Renames.**
+
+- `Silence threshold` → `Silence level` (it's an audio level, not a time threshold; avoids overloading "threshold" against `Window threshold`).
+- `Window close` → `Window threshold`.
+- `Auto-end sentence with period` → `Auto trailing period`.
+- `Auto-stop after silence` → `Auto stop (toggle mode only)` (caption inlined).
+- `Continuous dictation` → `Continuous dictation (experimental)` (caption inlined; "Toggle mode only" dropped since continuous dictation only existing in toggle mode is covered by the help popover).
+
+**Silence Detection reorder.** `Silence level` moved above `Auto stop` since it's the shared RMS definition used by both the auto-stop feature (toggle) and the chunk-boundary detector (continuous); the duration below is auto-stop-specific.
+
+**Enable gating.**
+
+- `updateContinuousDictationControls()` grays out all continuous-only fields when the master checkbox is off: Pause, Max chunk, Sentence pause, Window threshold, Strip whisper punctuation, Feed prior transcript, Max chars. Prompt-chain max chars has a nested gate on the prompt-chain checkbox. Auto trailing period stays always-enabled (applies to both modes); its seconds field gates on the checkbox instead.
+- `updateSilenceDetectionControls()` grays `Silence duration` when `Auto stop` is off. `Silence level` stays always-enabled because continuous dictation reads it even when auto-stop is off.
+- Both update methods are called from `updateConditionalRows` (via `syncFromPreferences`) and from their respective checkbox actions.
+
+**Steppers added.** Every numeric preference now has a stepper: Silence level, Silence duration, Pause, Max chunk, Max chars. Previously only threads, beam, typed delay, and the sentence-timing fields had them. Silence level accepts 4 decimal places (down from 3) with increments of 0.001 and a floor of 0.0001; display format changed to `%.4f` throughout.
+
+**Hint text shortened.** Inline hints now carry only unit + default + range. Explanatory clauses ("lower = more sensitive", "higher = more tolerant of pauses", "pause before text appears") moved into help popovers.
+
+**Help popovers.** New `HelpButton` and `HelpPopoverViewController` classes at file scope. Round `?` button next to non-obvious settings reveals an NSPopover with plain-text ELI5 explanations. Deployed on: Silence level, Silence duration, Pause, Max chunk, Sentence pause, Window threshold, Strip whisper punctuation, Feed prior transcript, Max chars, Method (paste/typed), Typed delay, Auto trailing period, Trailing period, Transcription threads, Accuracy. Obvious settings (Hotkey, Launch at login, Input device, sound popups, backend selector, Local model, API key, Backup/Restore, Save debug recordings, Log everything, Auto stop checkbox, Continuous dictation checkbox) have no help button. The Output tab's "Notes" caption was removed since its text about typed insertion now lives in the Method help popover.
+
+`HelpPopoverViewController` configures its `NSTextField` manually (word wrap, max layout width, non-editable) because the 10.12+ `wrappingLabelWithString` convenience initializer isn't available at the 10.11 deployment target.
+
+#### Transcript Processing: per-pass gating with raw bypass
+
+New Advanced tab section exposes the post-processing pipeline as six user-toggleable passes. Root checkbox `Apply transcript processing` (default on); when off, `postProcessTranscript` returns whisper's raw transcript verbatim. When on, five nested checkboxes each gate one pass independently:
+
+- `Remove non-speech annotations`: the `[BLANK_AUDIO]` / `(soft music)` / `*cough*` / leading `>>` / trailing `...` strip regexes.
+- `Normalize capitalization`: the regex-based casing pass plus the `i` / `i'll` re-uppercase.
+- `Capitalize nouns`: the hardcoded proper-noun fixup list (`applyCapitalizationFixups`).
+- `Capitalize abbreviations`: the hardcoded text-substitutions list (`applyTextSubstitutions`).
+- `Capitalize first letter at line start`: the standard-mode cursor-aware first-letter uppercasing.
+
+Six new booleans in `Preferences.swift`, all defaulting to true, all registered in `allUserDefaultsKeys`. Pref storage keys (`transcriptProcessingEnabled`, `removeNonSpeechAnnotations`, `normalizeCapitalization`, `applyProperNounFixups`, `applyTextSubstitutions`, `capitalizeFirstLetterAtLineStart`) are internal and do not need to mirror UI label changes.
+
+UI: `updateTranscriptProcessingControls()` greys out the five nested checkboxes when the root is off (pref values preserved). New `makeIndentedRow(views:indent:)` helper visually indents the children 20pt beneath the root. Each checkbox has its own help popover using the existing `HelpButton` infrastructure. Deliberately independent of `continuousDictationStripWhisperPunctuation`, `continuousDictationAutoEndPeriod`, `continuousDictationPromptChainEnabled`, and the continuous-dictation master checkbox: none of those are affected by the five new passes.
+
+#### About tab, inline update check, and auto-install
+
+Three changes bundled.
+
+**About consolidated into Preferences.** `App/AboutWindowController.swift` deleted. The About pane is now the sixth tab of Preferences, built by `buildAboutPane()`. Menu-bar "About push-to-dictate" opens Preferences and preselects this tab via new `PreferencesWindowController.showAbout(startUpdateCheck:)`. Layout matches the previous standalone window: 128pt icon, name, version, author, description, credits, copyright, Check for Updates button.
+
+**Update check inline.** `App/UpdateCheckWindowController.swift` deleted. The spinner, status label, detail label, and action buttons (`Download & Install`, `Open Release Page`, `Skip This Update`) are embedded directly in the About pane, hidden until the user clicks Check for Updates. Menu-bar "Check for Updates…" now routes through `showAbout(startUpdateCheck: true)`, which opens the About tab and auto-fires the check. Result handlers moved to `PreferencesWindowController` with two new callbacks (`onUpdateCheckResult`, `onUpdateSkipped`); `StatusItemController.presentAboutTab` wires them to the existing badge-state logic.
+
+**Auto-install pipeline.** New `Core/UpdateInstaller.swift`. Five stages: download zip via `URLSession.downloadTask` (progress reported by delegate), extract via `/usr/bin/ditto -xk` into `~/Library/Caches/push-to-dictate/updates/stage-<uuid>/`, strip `com.apple.quarantine` via `xattr -dr`, swap via a detached `/tmp/push-to-dictate-updater-<pid>.sh` script that waits for the parent to exit then `rm -rf` + `mv` + `open`, relaunch via `NSApp.terminate(nil)`. Guard: `UpdateInstaller.canInstallInPlace()` returns true only when the running bundle lives directly under `/Applications/`; any other install path hides the Download button and falls back to Open Release Page.
+
+Asset selection: `UpdateChecker` now parses `assets[]` and picks the single entry ending `-Full.zip`. Zero or multiple matches return `nil`, which also hides the Download button. `UpdateCheckResult.updateAvailable` grew a fourth associated value `downloadURL: URL?`; all call sites updated.
+
+Progress UI: shared progress bar + label below the three action buttons. Bar and label are individually hidden (not just their containing stack) because 10.11 AppKit does not reliably propagate `isHidden` through nested `NSStackView` to subviews with active size constraints, which was leaking the empty bar behind the Up-to-date text on the first iteration.
+
+Not implemented yet: background check on launch, downloaded-bundle code-signature validation, download resume on interrupt, checksum verification. All deferred to future work.
+
+CLAUDE.md: removed the `-Patch` hedge from the release-asset section. `-Full` is now described as the suffix the updater matches on, distinguishing the build from GitHub's auto-generated source-code zips.
+
+#### Acoustic overlap on max-chunk boundaries
+
+New `continuousDictationChunkOverlapSeconds` preference (default 0.0, range 0.0 to 1.5). When set to a positive value, max-chunk-triggered cuts retain the last N seconds of audio and prepend it to the next chunk's buffer so whisper sees acoustic context on both sides of a mid-speech cut. Pause-triggered cuts never overlap because they already end in silence.
+
+`AudioRecorder` changes:
+- `chunkBoundaryOverlapSeconds: TimeInterval?` property.
+- `overlapCarry: [Float]` private state, captured at emit time when the cut was max-chunk-driven, consumed on the next speech-begin transition.
+- `emitChunk()` now takes a `wasMaxChunkCut: Bool` parameter and only populates `overlapCarry` for the max-chunk path.
+- `onChunkBoundary` signature grew the `wasMaxChunkCut` bool so the consumer can decide whether to dedup.
+- Speech-begin transition prepends `overlapCarry` to the fresh buffer instead of unconditionally clearing, and seeds `chunkSampleCount` with the carry length so max-chunk duration counts overlapped audio against the cap.
+
+`StatusItemController` changes:
+- Tracks `previousChunkWasMaxCut` and `previousChunkTailTokens` across chunks within a session; both reset on session start.
+- Before `postProcessTranscript` runs on a chunk's raw text, if the prior chunk was a max-chunk cut and overlap was enabled, `dedupeOverlapTokens` tries to drop a matching leading-token prefix that equals a suffix of the prior chunk's tail tokens. Prefers the longest match; drops nothing if no match. An occasional duplicate is preferred over silently chopping real words.
+- Three new helpers (`isWordChar`, `trailingTokens`, `leadingTokensWithEnd`, `dedupeOverlapTokens`) handle Unicode-aware alphanumeric tokenization without Swift 5's `Character.isLetter`.
+
+Preferences UI:
+- New "Chunk overlap" row directly beneath "Max chunk" in the Transcription pane's Behavior section.
+- Field + stepper (increment 0.1), hint, help popover.
+- Gated with the rest of the continuous-dictation controls.
+- Validation range `[0.0, 1.5]`.
+
+Default of 0.0 preserves exact current behavior: no overlap, no dedup, no change to the existing chunk-boundary code path. Users opt in by raising the value.
+
+#### Consecutive-duplicate filter and overlap boundary logging
+
+Two changes addressing residual duplicates that the overlap dedup misses when whisper renders the overlapping word slightly differently in each chunk.
+
+**Filter.** New `filterConsecutiveDuplicates` preference (default on), exposed as the sixth checkbox in the Advanced tab's Transcript Processing section and gated under the root `Apply transcript processing` toggle. Collapses the second of any two adjacent identical alphanumeric tokens separated only by whitespace (no intervening punctuation). Case-insensitive, punctuation-insensitive on the compared tokens. Handles arbitrarily long runs (`no no no` → `no`). Preserves rhetorical emphasis marked by punctuation (`very, very good` left intact).
+
+Two passes per chunk:
+
+- Within-chunk pass runs `filterConsecutiveDuplicates` on the cleaned transcript.
+- Cross-chunk pass: if the first word of the current cleaned transcript exactly matches the lowercased last word of the previous chunk's injected text, drop it. Catches duplicates at the chunk boundary that overlap dedup missed because whisper transcribed the overlapped audio differently in the two chunks.
+
+New instance state `previousInjectedLastWord: String?` tracks the trailing injected word, captured via a new `lastWord(of:)` helper. Reset on session start along with the other continuous-session state.
+
+New static helpers in `StatusItemController`: `filterConsecutiveDuplicates(_:)`, `firstWord(of:)`, `lastWord(of:)`, reusing the existing `isWordChar` tokenizer.
+
+**Boundary logging.** When overlap dedup runs (max-chunk boundary with overlap configured), the log now includes the stored previous-chunk tail tokens, the incoming new-chunk head tokens, and the computed match length. Replaces the previous `trimmed leading tokens` one-liner. Also logs when the consecutive-duplicate filter collapses within-chunk repeats, and when the cross-chunk pass drops a boundary repeat with the word it dropped. All three log lines give enough visibility to tune overlap seconds against observed duplicate behavior without guessing.
+
+#### Per-chunk debug recordings
+
+Extends `Save debug recordings` so that while it's on and continuous dictation is active, each chunk's audio is written to disk at the moment it's enqueued for transcription, alongside a sibling `.txt` file written after transcription completes.
+
+Layout: `~/Library/Application Support/push-to-dictate/debug/session-<yyyyMMdd-HHmmss>/chunk-NNN-<reason>.wav` plus `chunk-NNN-<reason>.txt`. `<reason>` is `maxchunk` or `pause` depending on `wasMaxChunkCut`. Session folder is lazy-created on the first chunk of a dictation session; `debugSessionDir` and `debugChunkCounter` on `StatusItemController` reset at session start.
+
+Sidecar `.txt` contents, one per chunk:
+
+- wav filename, measured `gap` and `elapsed`, cut reason
+- whisper's raw transcript
+- post-overlap-dedup transcript
+- `prevTail` tokens that dedup compared against
+- `newHead` tokens seen in this chunk
+- `matchLen` (how many leading tokens the dedup dropped, 0 if none)
+- post-processing `cleaned` text
+- final `injected` string that reached the cursor
+- `prevInjectedLastWord` used by the cross-chunk duplicate filter
+
+Purpose: when a chunk boundary produces a weird transcription (hallucinated word, dropped word, double word that leaked through), the user can open the session folder, listen to the exact audio whisper received, and see in the sidecar why each stage decided what it did. Eliminates guessing from log inspection alone.
+
+`AudioRecorder.writeDebugWav` refactored: its WAV-writing core was pulled out into `static writeSamplesAsWav(samples:to:)` so `StatusItemController` can write per-chunk WAVs without duplicating AVAudioFile setup. Session-end full capture still uses the same path. No format change (16 kHz mono 16-bit PCM).
+
+`Clear Debug Recordings…` button now counts WAVs across both the top-level folder and all `session-*` subfolders, and deletes session folders entirely (which also removes their sidecar `.txt` files). Backward-compatible with the previous flat layout.
+
+#### Merge: Pause absorbs Sentence pause
+
+The `continuousDictationSentencePauseSeconds` preference ("Sentence pause") was removed. `continuousDictationPauseSeconds` ("Pause") now plays its role as the new-sentence window floor. Timing model becomes:
+
+- Silence < Pause: no chunk emits, user's speech stays in the current chunk.
+- Silence >= Pause: chunk emits. If the gap to the next chunk's first speech is in `[Pause, Window threshold]`, the next chunk gets `". "` + capital. Beyond Window threshold, the next chunk is treated as a fresh restart.
+
+Rationale: the old `[Pause, Sentence pause)` continuation band was a 0.1s-to-0.5s micro-window that essentially never matched how humans actually pause. Real mid-sentence breaths land below Pause (and are already handled implicitly by chunk accumulation). Real sentence breaks land above Sentence pause. The intermediate band was storage for "I paused exactly at the chunk boundary but was going to keep going," a scenario rare enough that collapsing it costs nothing.
+
+Removed:
+
+- `Key.continuousDictationSentencePauseSeconds`, its getter/setter, and its entry in `allUserDefaultsKeys`.
+- `continuousSentencePauseField` / `continuousSentencePauseStepper` / `continuousSentencePauseLabel` in `PreferencesWindowController`.
+- The "Sentence pause:" row from the Transcription Behavior section.
+- `applyCascadingSentencePause(_:)` (the proportional cascade). Replaced by a smaller `bumpDependentsIfNeededAfterPauseChange` helper: when Pause changes, if Window threshold is now <= Pause it's nudged to `Pause + 0.1`, and Trailing period follows the same rule against Window threshold. Keeps the three remaining timing knobs monotonic without aggressive scaling.
+
+Changed:
+
+- `StatusItemController.handleContinuousResult` gap check: `gap >= continuousDictationSentencePauseSeconds` → `gap >= continuousDictationPauseSeconds`.
+- `continuousSentencePauseMaxField` (Window threshold) validator floor: now `continuousDictationPauseSeconds + 0.1` instead of the sentence-pause value. Same for its stepper clamp.
+- Pause help text now mentions its dual role as chunk-emit threshold and sentence-break floor.
+- Window threshold help text references the Pause floor instead of Sentence pause.
+
+Backward compat: the deleted UserDefaults key is harmless if present in a backup restore; nothing reads it anymore.
+
+#### Default retune: sentence pause, window threshold, max chunk, chunk overlap
+
+Updated continuous-dictation defaults based on hands-on experimentation on the merged timing model.
+
+- Sentence pause: 0.5 → **1.0** seconds.
+- Window threshold: 2.0 → **2.5** seconds. Floor constraint tightened from `> Sentence pause` to **`>= Sentence pause + 1.0`**.
+- Max chunk: 30 → **5** seconds. Range widened: 5-30 → **5-50**.
+- Chunk overlap: 0.0 → **0.3** seconds. Range unchanged (0-1.5). Default moved from `stored == 0 ? 0.0 : stored` to an `object(forKey:) == nil` sentinel so users can still explicitly disable overlap by setting 0.
+- Trailing period floor against Window threshold: was `> Window threshold` → now **`>= Window threshold + 0.5`**.
+
+Rationale:
+
+- The 1.0s Sentence pause default is calibrated for conversational dictation rhythms. Default 0.5 was too aggressive post-merge (every half-second breath started a new sentence).
+- Larger Sentence pause → Window threshold gap (1.0 instead of 0.1) prevents the two knobs from being set so close that a tiny gap window produces unpredictable behavior. Users can still open the window as wide as they want; they just can't close it below 1 second.
+- Max chunk default of 5s combined with Chunk overlap of 0.3 is what works well in practice: text appears quickly, boundary artifacts are smoothed by the overlap, and the max of 50s gives users with slower-paced speech a wide ceiling.
+- Trailing period >= Window threshold + 0.5 is enforced symmetrically with the Sentence pause / Window threshold rule, same validator + stepper + auto-bump pattern. The 0.5 gap is tighter than the 1.0 above it because the user-visible consequence (eventual trailing period after prolonged silence) is less sensitive to the exact boundary.
+
+Enforcement in `PreferencesWindowController`:
+
+- Validators (both typed-field commit and `numericFieldIsValid`) use `>= minVal`, not `> minVal`, so the enforced minimum is exactly `Sentence pause + 1.0` (not `+ 1.0 + epsilon`).
+- Steppers clamp their raw `doubleValue` with `max(minVal, min(ceiling, raw))`.
+- `bumpDependentsIfNeededAfterPauseChange` triggers if either dependent would drop below its minimum gap after a Sentence pause edit. Fires only when needed; never pushes dependents down.
+
+Hint strings and help-popover examples updated to match the new defaults.
+
+#### Minor UI polish on continuous dictation prefs
+
+- "Pause" label renamed to "Sentence pause". Describes what the setting produces (sentence boundary) rather than what the user does (pausing). Internal pref key (`continuousDictationPauseSeconds`) unchanged to avoid stranding existing values.
+- Help button added to the Backend popup in Transcription. Describes what each backend is: whisper.cpp runs locally (audio stays on the Mac, offline, no ongoing cost); OpenAI API runs on OpenAI's servers (audio sent over the internet, API key required, billed per minute). No comparative language.
+- Rows in Transcription Behavior reordered: Sentence pause and Window threshold are now adjacent, followed by Max chunk and Chunk overlap. The sentence-boundary pair come first; the chunk-management pair follow.
