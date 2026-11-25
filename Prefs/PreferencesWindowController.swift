@@ -21,6 +21,57 @@ final class PreferencesWindowController: NSWindowController,
     var onUpdateCheckResult: ((UpdateCheckResult) -> Void)?
     var onUpdateSkipped: ((String) -> Void)?
 
+    // MARK: - Updates tab state
+
+    private let autoUpdateCheckbox: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = "Check for updates automatically"
+        return b
+    }()
+    private let autoUpdateFrequencyPopup = NSPopUpButton()
+    private var autoUpdateFrequencyLabel: NSTextField?
+    private let releasesTable = NSTableView()
+    private let releasesFetchButton: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .rounded
+        b.title = "Fetch releases"
+        return b
+    }()
+    private let releasesDownloadButton: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .rounded
+        b.title = "Download & install"
+        b.isEnabled = false
+        return b
+    }()
+    private let releasesOpenPageButton: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .rounded
+        b.title = "Open release page"
+        b.isEnabled = false
+        return b
+    }()
+    private let releasesStatusLabel: NSTextField = {
+        let f = NSTextField(frame: .zero)
+        f.isEditable = false; f.isSelectable = false
+        f.isBordered = false; f.drawsBackground = false
+        f.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        f.textColor = .secondaryLabelColor
+        f.stringValue = ""
+        return f
+    }()
+    private let releasesSpinner: NSProgressIndicator = {
+        let s = NSProgressIndicator(frame: .zero)
+        s.style = .spinning
+        s.isIndeterminate = true
+        s.controlSize = .small
+        s.isHidden = true
+        return s
+    }()
+    private var releasesList: [ReleaseInfo] = []
+    private var updatesInstaller: UpdateInstaller?
+
     // MARK: - Inline update check state
 
     private let updateCheckButton: NSButton = {
@@ -326,7 +377,7 @@ final class PreferencesWindowController: NSWindowController,
     private var isRecordingHotkey = false
 
     private let categoryTitles = ["General", "Audio", "Transcription", "Output",
-                                  "Advanced", "About"]
+                                  "Advanced", "Updates", "About"]
     private var categoryViews: [NSView] = []
     private let sidebarTable = NSTableView()
     private let contentContainer = NSView()
@@ -578,6 +629,7 @@ final class PreferencesWindowController: NSWindowController,
             buildTranscriptionPane(),
             buildOutputPane(),
             buildAdvancedPane(),
+            buildUpdatesPane(),
             buildAboutPane()
         ]
 
@@ -1558,6 +1610,107 @@ final class PreferencesWindowController: NSWindowController,
         return pane
     }
 
+    private func buildUpdatesPane() -> NSView {
+        let pane = FlippedView()
+        pane.translatesAutoresizingMaskIntoConstraints = false
+
+        // Automatic update check section.
+        autoUpdateCheckbox.target = self
+        autoUpdateCheckbox.action = #selector(autoUpdateCheckboxChanged)
+
+        autoUpdateFrequencyPopup.removeAllItems()
+        autoUpdateFrequencyPopup.addItem(withTitle: "At every startup")
+        autoUpdateFrequencyPopup.addItem(withTitle: "Once a day")
+        autoUpdateFrequencyPopup.target = self
+        autoUpdateFrequencyPopup.action = #selector(autoUpdateFrequencyChanged)
+
+        let autoCheckHelp = HelpButton(text:
+            "Runs a background check for new releases on GitHub. " +
+            "Nothing downloads automatically; a new release updates " +
+            "the menu-bar icon badge so you can start the download " +
+            "yourself from the About tab.")
+        let autoCheckRow = NSStackView(views: [autoUpdateCheckbox, autoCheckHelp])
+        autoCheckRow.orientation = .horizontal
+        autoCheckRow.alignment = .centerY
+        autoCheckRow.spacing = 8
+
+        let frequencyLabel = makeLabel("Frequency:")
+        autoUpdateFrequencyLabel = frequencyLabel
+        let frequencyRow = NSStackView(views: [frequencyLabel, autoUpdateFrequencyPopup])
+        frequencyRow.orientation = .horizontal
+        frequencyRow.alignment = .centerY
+        frequencyRow.spacing = 8
+
+        let autoSection = buildSection(title: "Automatic update check",
+                                       rows: [autoCheckRow, frequencyRow])
+
+        // Release history section.
+        releasesFetchButton.target = self
+        releasesFetchButton.action = #selector(fetchReleasesClicked)
+        releasesDownloadButton.target = self
+        releasesDownloadButton.action = #selector(downloadSelectedReleaseClicked)
+        releasesOpenPageButton.target = self
+        releasesOpenPageButton.action = #selector(openSelectedReleasePageClicked)
+
+        releasesTable.rowSizeStyle = .medium
+        releasesTable.allowsEmptySelection = true
+        releasesTable.allowsMultipleSelection = false
+        releasesTable.dataSource = self
+        releasesTable.delegate = self
+        releasesTable.identifier = NSUserInterfaceItemIdentifier("ReleasesTable")
+
+        let versionCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Version"))
+        versionCol.title = "Version"
+        versionCol.width = 120
+        let dateCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Date"))
+        dateCol.title = "Date"
+        dateCol.width = 140
+        let statusCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Status"))
+        statusCol.title = ""
+        statusCol.width = 100
+        releasesTable.addTableColumn(versionCol)
+        releasesTable.addTableColumn(dateCol)
+        releasesTable.addTableColumn(statusCol)
+
+        let tableScroll = NSScrollView()
+        tableScroll.documentView = releasesTable
+        tableScroll.hasVerticalScroller = true
+        tableScroll.hasHorizontalScroller = false
+        tableScroll.borderType = .bezelBorder
+        tableScroll.translatesAutoresizingMaskIntoConstraints = false
+        tableScroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
+
+        let topRow = NSStackView(views: [releasesFetchButton, releasesSpinner,
+                                         releasesStatusLabel])
+        topRow.orientation = .horizontal
+        topRow.alignment = .centerY
+        topRow.spacing = 8
+
+        let bottomRow = NSStackView(views: [releasesDownloadButton, releasesOpenPageButton])
+        bottomRow.orientation = .horizontal
+        bottomRow.spacing = 8
+
+        let historyStack = NSStackView(views: [topRow, tableScroll, bottomRow])
+        historyStack.orientation = .vertical
+        historyStack.alignment = .leading
+        historyStack.spacing = 8
+        historyStack.translatesAutoresizingMaskIntoConstraints = false
+        tableScroll.widthAnchor.constraint(equalTo: historyStack.widthAnchor).isActive = true
+
+        let historySection = buildSection(title: "Release history",
+                                          rows: [historyStack])
+
+        let inset = PreferencesWindowController.paneInset
+        let gap = PreferencesWindowController.sectionGap
+        let after1 = placeSection(autoSection, in: pane,
+                                  below: pane.topAnchor, topConstant: inset)
+        let after2 = placeSection(historySection, in: pane,
+                                  below: after1, topConstant: gap)
+        pane.bottomAnchor.constraint(greaterThanOrEqualTo: after2,
+                                     constant: inset).isActive = true
+        return pane
+    }
+
     private func buildAboutPane() -> NSView {
         let pane = FlippedView()
         pane.translatesAutoresizingMaskIntoConstraints = false
@@ -1851,15 +2004,21 @@ final class PreferencesWindowController: NSWindowController,
         return container
     }
 
-    // MARK: - Sidebar table
+    // MARK: - Table data source / delegate (sidebar + releases)
 
     func numberOfRows(in tableView: NSTableView) -> Int {
+        if tableView === releasesTable {
+            return releasesList.count
+        }
         return categoryTitles.count
     }
 
     func tableView(_ tableView: NSTableView,
                    viewFor tableColumn: NSTableColumn?,
                    row: Int) -> NSView? {
+        if tableView === releasesTable {
+            return releasesCell(tableColumn: tableColumn, row: row)
+        }
         let identifier = NSUserInterfaceItemIdentifier("Category")
         let cell: NSTableCellView
         if let reused = tableView.makeView(withIdentifier: identifier, owner: self)
@@ -1885,7 +2044,62 @@ final class PreferencesWindowController: NSWindowController,
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        if let tv = notification.object as? NSTableView, tv === releasesTable {
+            updateReleasesActionButtons()
+            return
+        }
         showCategory(at: sidebarTable.selectedRow)
+    }
+
+    private func releasesCell(tableColumn: NSTableColumn?, row: Int) -> NSView {
+        let colId = tableColumn?.identifier.rawValue ?? ""
+        let identifier = NSUserInterfaceItemIdentifier("Release-\(colId)")
+        let cell: NSTableCellView
+        if let reused = releasesTable.makeView(withIdentifier: identifier,
+                                               owner: self) as? NSTableCellView {
+            cell = reused
+        } else {
+            cell = NSTableCellView()
+            cell.identifier = identifier
+            let label = NSTextField(frame: .zero)
+            label.isEditable = false; label.isSelectable = false
+            label.isBordered = false; label.drawsBackground = false
+            label.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 6),
+                label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+                label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            ])
+            cell.textField = label
+        }
+        guard row < releasesList.count else {
+            cell.textField?.stringValue = ""
+            return cell
+        }
+        let release = releasesList[row]
+        switch colId {
+        case "Version":
+            cell.textField?.stringValue = "v\(release.version)"
+        case "Date":
+            if let date = release.publishedDate {
+                let fmt = DateFormatter()
+                fmt.dateStyle = .medium
+                fmt.timeStyle = .none
+                cell.textField?.stringValue = fmt.string(from: date)
+            } else {
+                cell.textField?.stringValue = ""
+            }
+        case "Status":
+            let installed = UpdateChecker.installedVersion
+            cell.textField?.stringValue =
+                (release.version == installed) ? "installed" : ""
+            cell.textField?.textColor =
+                (release.version == installed) ? .systemBlue : .labelColor
+        default:
+            cell.textField?.stringValue = ""
+        }
+        return cell
     }
 
     // MARK: - Refresh
@@ -1969,6 +2183,13 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.capitalizeFirstLetterAtLineStart ? .on : .off
         filterDuplicatesCheckbox.state =
             Preferences.shared.filterConsecutiveDuplicates ? .on : .off
+        autoUpdateCheckbox.state =
+            Preferences.shared.autoUpdateCheckEnabled ? .on : .off
+        switch Preferences.shared.autoUpdateCheckFrequency {
+        case .atStartup: autoUpdateFrequencyPopup.selectItem(at: 0)
+        case .daily:     autoUpdateFrequencyPopup.selectItem(at: 1)
+        }
+        updateAutoUpdateControls()
         updateConditionalRows()
     }
 
@@ -2426,6 +2647,102 @@ final class PreferencesWindowController: NSWindowController,
             setNumericFieldValid(field: continuousTrailingPeriodField,
                                  label: continuousTrailingPeriodLabel, valid: true)
         }
+    }
+
+    // MARK: - Updates tab actions
+
+    @objc private func autoUpdateCheckboxChanged() {
+        Preferences.shared.autoUpdateCheckEnabled =
+            (autoUpdateCheckbox.state == .on)
+        updateAutoUpdateControls()
+        notifyAutoUpdateConfigChanged()
+    }
+
+    @objc private func autoUpdateFrequencyChanged() {
+        let idx = autoUpdateFrequencyPopup.indexOfSelectedItem
+        Preferences.shared.autoUpdateCheckFrequency = (idx == 1) ? .daily : .atStartup
+        notifyAutoUpdateConfigChanged()
+    }
+
+    private func notifyAutoUpdateConfigChanged() {
+        if let delegate = NSApp.delegate as? AppDelegate {
+            delegate.reconfigureAutomaticUpdateChecks()
+        }
+    }
+
+    private func updateAutoUpdateControls() {
+        let enabled = autoUpdateCheckbox.state == .on
+        autoUpdateFrequencyPopup.isEnabled = enabled
+        autoUpdateFrequencyLabel?.textColor =
+            enabled ? .labelColor : .disabledControlTextColor
+    }
+
+    @objc private func fetchReleasesClicked() {
+        releasesFetchButton.isEnabled = false
+        releasesSpinner.isHidden = false
+        releasesSpinner.startAnimation(nil)
+        releasesStatusLabel.stringValue = "Fetching\u{2026}"
+        UpdateChecker.fetchAllReleases { [weak self] releases, error in
+            guard let self = self else { return }
+            self.releasesSpinner.stopAnimation(nil)
+            self.releasesSpinner.isHidden = true
+            self.releasesFetchButton.isEnabled = true
+            if let error = error {
+                self.releasesStatusLabel.stringValue = error
+                return
+            }
+            self.releasesList = releases ?? []
+            self.releasesTable.reloadData()
+            self.releasesStatusLabel.stringValue =
+                "\(self.releasesList.count) release\(self.releasesList.count == 1 ? "" : "s")"
+            self.updateReleasesActionButtons()
+        }
+    }
+
+    @objc private func downloadSelectedReleaseClicked() {
+        let row = releasesTable.selectedRow
+        guard row >= 0, row < releasesList.count else { return }
+        let release = releasesList[row]
+        guard let url = release.downloadURL else {
+            releasesStatusLabel.stringValue = "This release has no downloadable asset."
+            return
+        }
+        if !UpdateInstaller.canInstallInPlace() {
+            releasesStatusLabel.stringValue =
+                "Auto-install only works when the app is in /Applications."
+            return
+        }
+        releasesDownloadButton.isEnabled = false
+        releasesStatusLabel.stringValue = "Starting download\u{2026}"
+        let installer = UpdateInstaller(downloadURL: url)
+        updatesInstaller = installer
+        installer.onStageChange = { [weak self] stage in
+            DispatchQueue.main.async { self?.releasesStatusLabel.stringValue = stage }
+        }
+        installer.onFailure = { [weak self] msg in
+            DispatchQueue.main.async {
+                self?.releasesStatusLabel.stringValue = "Failed: \(msg)"
+                self?.releasesDownloadButton.isEnabled = true
+            }
+        }
+        installer.onReadyToRelaunch = {
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+        installer.start()
+    }
+
+    @objc private func openSelectedReleasePageClicked() {
+        let row = releasesTable.selectedRow
+        guard row >= 0, row < releasesList.count else { return }
+        NSWorkspace.shared.open(releasesList[row].releaseURL)
+    }
+
+    private func updateReleasesActionButtons() {
+        let row = releasesTable.selectedRow
+        let hasSelection = row >= 0 && row < releasesList.count
+        releasesOpenPageButton.isEnabled = hasSelection
+        releasesDownloadButton.isEnabled = hasSelection
+            && releasesList[row].downloadURL != nil
     }
 
     @objc private func saveDebugRecordingsChanged() {

@@ -38,6 +38,9 @@ final class Preferences {
         static let silenceAutoStopSeconds = "silenceAutoStopSeconds"
         static let typedKeystrokeDelayMs = "typedKeystrokeDelayMs"
         static let skippedUpdateVersion = "skippedUpdateVersion"
+        static let autoUpdateCheckEnabled = "autoUpdateCheckEnabled"
+        static let autoUpdateCheckFrequency = "autoUpdateCheckFrequency"
+        static let lastAutoUpdateCheckDate = "lastAutoUpdateCheckDate"
         static let continuousDictationEnabled = "continuousDictationEnabled"
         static let continuousDictationPauseSeconds = "continuousDictationPauseSeconds"
         static let continuousDictationMaxChunkSeconds = "continuousDictationMaxChunkSeconds"
@@ -516,6 +519,36 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.skippedUpdateVersion) }
     }
 
+    // Whether the app runs a GitHub release check in the background.
+    // The check never downloads automatically; a positive result updates
+    // the menu-bar badge so the user can initiate the download themselves.
+    // Default on.
+    var autoUpdateCheckEnabled: Bool {
+        get {
+            if defaults.object(forKey: Key.autoUpdateCheckEnabled) == nil { return true }
+            return defaults.bool(forKey: Key.autoUpdateCheckEnabled)
+        }
+        set { defaults.set(newValue, forKey: Key.autoUpdateCheckEnabled) }
+    }
+
+    enum AutoUpdateCheckFrequency: String {
+        case atStartup
+        case daily
+    }
+
+    var autoUpdateCheckFrequency: AutoUpdateCheckFrequency {
+        get {
+            let stored = defaults.string(forKey: Key.autoUpdateCheckFrequency) ?? ""
+            return AutoUpdateCheckFrequency(rawValue: stored) ?? .atStartup
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.autoUpdateCheckFrequency) }
+    }
+
+    var lastAutoUpdateCheckDate: Date? {
+        get { return defaults.object(forKey: Key.lastAutoUpdateCheckDate) as? Date }
+        set { defaults.set(newValue, forKey: Key.lastAutoUpdateCheckDate) }
+    }
+
     static var debugRecordingsDirectory: URL {
         return defaultSupportDirectory.appendingPathComponent("debug", isDirectory: true)
     }
@@ -644,6 +677,8 @@ final class Preferences {
         Key.silenceAutoStopEnabled, Key.silenceAutoStopThreshold,
         Key.silenceAutoStopSeconds, Key.typedKeystrokeDelayMs,
         Key.skippedUpdateVersion,
+        Key.autoUpdateCheckEnabled, Key.autoUpdateCheckFrequency,
+        Key.lastAutoUpdateCheckDate,
         Key.continuousDictationEnabled, Key.continuousDictationPauseSeconds,
         Key.continuousDictationMaxChunkSeconds,
         Key.continuousDictationChunkOverlapSeconds,

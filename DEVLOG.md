@@ -1418,3 +1418,25 @@ Hint strings and help-popover examples updated to match the new defaults.
 - "Pause" label renamed to "Sentence pause". Describes what the setting produces (sentence boundary) rather than what the user does (pausing). Internal pref key (`continuousDictationPauseSeconds`) unchanged to avoid stranding existing values.
 - Help button added to the Backend popup in Transcription. Describes what each backend is: whisper.cpp runs locally (audio stays on the Mac, offline, no ongoing cost); OpenAI API runs on OpenAI's servers (audio sent over the internet, API key required, billed per minute). No comparative language.
 - Rows in Transcription Behavior reordered: Sentence pause and Window threshold are now adjacent, followed by Max chunk and Chunk overlap. The sentence-boundary pair come first; the chunk-management pair follow.
+
+#### Updates tab: automatic check preference + release history table
+
+New Preferences tab between Advanced and About.
+
+**Automatic update check section.**
+- `autoUpdateCheckEnabled: Bool` (default on). A checkbox controls it.
+- `autoUpdateCheckFrequency: AutoUpdateCheckFrequency` enum (`.atStartup` | `.daily`, default `.atStartup`). A popup below the checkbox selects it; grays out when the checkbox is off.
+- `lastAutoUpdateCheckDate: Date?` written after every silent check. Used by the `.daily` path to decide whether a startup check should also fire as a catch-up.
+- Logic lives in `AppDelegate.setupAutomaticUpdateChecks()`: on launch, if enabled, either runs an immediate check (for `.atStartup`) or runs one only if the last-check timestamp is >= 24h old (for `.daily`). If `.daily`, also arms a 24h repeating `Timer`. The preferences UI calls `AppDelegate.reconfigureAutomaticUpdateChecks()` after each change so the timer rearms cleanly without needing a restart.
+- Check path is `StatusItemController.performSilentUpdateCheck()`. Same code as the About-tab check, but runs without opening any window. On result, updates `pendingUpdateVersion`, the menu-bar icon badge, and the menu item title. Never downloads automatically; the user still opens About → Check for Updates to initiate the download.
+
+**Release history section.**
+- `Fetch releases` button calls new `UpdateChecker.fetchAllReleases(_:)`, which hits `/repos/<owner>/<repo>/releases` (plural) and parses the full array. Returns `[ReleaseInfo]` (`version`, `publishedDate`, `releaseURL`, `downloadURL`). Lazy: no fetch happens until the user clicks the button.
+- `NSTableView` columns: Version, Date, Status. The row matching the installed CalVer gets `"installed"` in the Status column styled blue.
+- `Download & install` button at the bottom kicks off `UpdateInstaller` for the selected row's download URL. Supports downgrades (nothing in the installer compares versions; it just replaces the bundle).
+- `Open release page` button opens the row's `html_url` in the default browser, as a fallback when auto-install isn't available (app not in `/Applications/`, or the release has no `-Full.zip` asset).
+- Status label beside the Fetch button reports fetch count / error text / install progress.
+
+Table dispatch in the existing data source: `numberOfRows` and `viewFor tableColumn:row:` branch on `tableView === releasesTable` vs the sidebar. `tableViewSelectionDidChange` branches similarly and calls `updateReleasesActionButtons` to enable/disable the action buttons based on selection and asset availability.
+
+All three new prefs added to `allUserDefaultsKeys` so they round-trip through Export/Import.

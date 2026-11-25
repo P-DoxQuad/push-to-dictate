@@ -1712,6 +1712,30 @@ final class StatusItemController: NSObject,
         presentAboutTab(startUpdateCheck: true)
     }
 
+    // Runs an update check without opening any window. Updates the badge
+    // and menu item state silently. Called by AppDelegate on launch and
+    // on the daily timer when auto-check is enabled.
+    func performSilentUpdateCheck() {
+        UpdateChecker.checkForUpdates { [weak self] result in
+            guard let self = self else { return }
+            let skipped = Preferences.shared.skippedUpdateVersion
+            switch result {
+            case .updateAvailable(_, let latest, _, _):
+                self.pendingUpdateVersion = (latest == skipped) ? nil : latest
+            case .upToDate:
+                self.pendingUpdateVersion = nil
+                if !skipped.isEmpty {
+                    Preferences.shared.skippedUpdateVersion = ""
+                }
+            case .error:
+                break
+            }
+            Preferences.shared.lastAutoUpdateCheckDate = Date()
+            self.refreshUpdatesMenuItem()
+            self.refreshMenuBarIcon()
+        }
+    }
+
     private func presentAboutTab(startUpdateCheck: Bool) {
         let controller = PreferencesWindowController.shared
         controller.onHotkeyChanged = { [weak self] in self?.applyHotkeySettings() }

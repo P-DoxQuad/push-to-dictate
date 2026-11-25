@@ -7,9 +7,18 @@ enum UpdateCheckResult {
     case error(String)
 }
 
+struct ReleaseInfo {
+    let version: String
+    let publishedDate: Date?
+    let releaseURL: URL
+    let downloadURL: URL?
+}
+
 enum UpdateChecker {
     private static let releasesAPIURL =
         URL(string: "https://api.github.com/repos/P-DoxQuad/push-to-dictate/releases/latest")!
+    private static let allReleasesAPIURL =
+        URL(string: "https://api.github.com/repos/P-DoxQuad/push-to-dictate/releases")!
     private static let releasesPageURL =
         URL(string: "https://github.com/P-DoxQuad/push-to-dictate/releases")!
 
@@ -87,6 +96,67 @@ enum UpdateChecker {
         case .orderedSame, .orderedAscending:
             return .upToDate(current: current)
         }
+    }
+
+    // Fetches every release from the GitHub API (not just the latest).
+    // Returns the list on success; a non-nil error message on failure.
+    // Called by the Updates tab's Fetch button. Results are not cached;
+    // the caller controls fetch frequency.
+    static func fetchAllReleases(
+        completion: @escaping ([ReleaseInfo]?, String?) -> Void) {
+        var request = URLRequest(url: allReleasesAPIURL)
+        request.timeoutInterval = requestTimeout
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            let result = parseAllReleases(data: data, response: response, error: error)
+            DispatchQueue.main.async { completion(result.releases, result.error) }
+        }
+        task.resume()
+    }
+
+    private static func parseAllReleases(data: Data?,
+                                          response: URLResponse?,
+                                          error: Error?)
+        -> (releases: [ReleaseInfo]?, error: String?) {
+        if let error = error {
+            return (nil, "Couldn't reach GitHub: \(error.localizedDescription)")
+        }
+        guard let http = response as? HTTPURLResponse else {
+            return (nil, "Couldn't reach GitHub.")
+        }
+        guard http.statusCode == 200 else {
+            return (nil, "GitHub returned status \(http.statusCode).")
+        }
+        guard let data = data,
+              let json = try? JSONSerialization.jsonObject(with: data, options: []),
+              let array = json as? [[String: Any]] else {
+            return (nil, "Could not parse releases list.")
+        }
+        // GitHub emits ISO 8601 timestamps like "2026-11-24T12:34:56Z".
+        // ISO8601DateFormatter is 10.12+, so parse with DateFormatter
+        // configured for the UTC form. `XXX` handles both "Z" and
+        // "+00:00" style suffixes.
+        let isoFmt = DateFormatter()
+        isoFmt.locale = Locale(identifier: "en_US_POSIX")
+        isoFmt.timeZone = TimeZone(identifier: "UTC")
+        isoFmt.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXX"
+        var out: [ReleaseInfo] = []
+        for dict in array {
+            guard let tag = dict["tag_name"] as? String,
+                  let htmlURLString = dict["html_url"] as? String,
+                  let htmlURL = URL(string: htmlURLString) else { continue }
+            let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+            var pubDate: Date? = nil
+            if let s = dict["published_at"] as? String {
+                pubDate = isoFmt.date(from: s)
+            }
+            let dl = pickFullAssetURL(from: dict["assets"])
+            out.append(ReleaseInfo(version: version,
+                                   publishedDate: pubDate,
+                                   releaseURL: htmlURL,
+                                   downloadURL: dl))
+        }
+        return (out, nil)
     }
 
     // Pick the single asset whose filename ends with "-Full.zip". Zero or
