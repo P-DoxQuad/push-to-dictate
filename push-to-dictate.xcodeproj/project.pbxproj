@@ -36,6 +36,7 @@
 		A1B2C3E030B00004000000AA /* UpdateInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3DF30B00004000000AA /* UpdateInstaller.swift */; };
 		A1B2C3D730B00002000000AA /* AccessibilityRequestWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D630B00002000000AA /* AccessibilityRequestWindowController.swift */; };
 		A1B2C3DB30B00003000000AA /* CursorContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3DA30B00003000000AA /* CursorContext.swift */; };
+		A1B2C3E130B00005000000AA /* AppearanceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3E230B00005000000AA /* AppearanceManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -92,6 +93,7 @@
 		A1B2C3DF30B00004000000AA /* UpdateInstaller.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UpdateInstaller.swift; sourceTree = "<group>"; };
 		A1B2C3D630B00002000000AA /* AccessibilityRequestWindowController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AccessibilityRequestWindowController.swift; sourceTree = "<group>"; };
 		A1B2C3DA30B00003000000AA /* CursorContext.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CursorContext.swift; sourceTree = "<group>"; };
+		A1B2C3E230B00005000000AA /* AppearanceManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppearanceManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -139,6 +141,7 @@
 			children = (
 				136EDBC230A9286800B3EC5B /* HelpWindowController.swift */,
 				A1B2C3D630B00002000000AA /* AccessibilityRequestWindowController.swift */,
+				A1B2C3E230B00005000000AA /* AppearanceManager.swift */,
 				136EDB6930A5757B00B3EC5B /* main.swift */,
 				13743FD930A2D8EB00FAC440 /* AppDelegate.swift */,
 				13743FDA30A2D8EB00FAC440 /* Info.plist */,
@@ -274,6 +277,7 @@
 				A1B2C3D430B00001000000AA /* UpdateChecker.swift in Sources */,
 				A1B2C3E030B00004000000AA /* UpdateInstaller.swift in Sources */,
 				A1B2C3D730B00002000000AA /* AccessibilityRequestWindowController.swift in Sources */,
+				A1B2C3E130B00005000000AA /* AppearanceManager.swift in Sources */,
 				13743FEB30A2D8EB00FAC440 /* Transcriber.swift in Sources */,
 				136EDBC330A9286800B3EC5B /* HelpWindowController.swift in Sources */,
 				136EDB9030A8C93F00B3EC5B /* ModelCatalog.swift in Sources */,

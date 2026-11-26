@@ -56,6 +56,8 @@ final class ManageModelsWindowController: NSWindowController {
         catalogHeader.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
         outer.addArrangedSubview(catalogHeader)
 
+        let catalogBox = ManageModelsWindowController.makeSectionBox()
+        let catalogInner = ManageModelsWindowController.innerStack(in: catalogBox)
         for entry in ModelCatalog.entries {
             let row = ModelRowView(entry: entry)
             row.onDownload = { [weak self] in self?.downloadCatalogEntry(entry) }
@@ -63,14 +65,11 @@ final class ManageModelsWindowController: NSWindowController {
             row.onCancel = { [weak self] in self?.cancelDownload(entry) }
             row.onUse = { [weak self] in self?.activate(filename: entry.filename) }
             rowViews[entry.filename] = row
-            outer.addArrangedSubview(row)
+            catalogInner.addArrangedSubview(row)
         }
-
-        let catalogDivider = NSBox()
-        catalogDivider.boxType = .separator
-        outer.addArrangedSubview(catalogDivider)
-        catalogDivider.widthAnchor.constraint(equalTo: outer.widthAnchor,
-                                              constant: -40).isActive = true
+        outer.addArrangedSubview(catalogBox)
+        catalogBox.widthAnchor.constraint(equalTo: outer.widthAnchor,
+                                          constant: -40).isActive = true
 
         // Fixed "Custom models" header above the scroll area.
         let customHeader = NSTextField(frame: .zero)
@@ -106,23 +105,22 @@ final class ManageModelsWindowController: NSWindowController {
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
-        scroll.borderType = .bezelBorder
+        scroll.borderType = .noBorder
         scroll.drawsBackground = false
         scroll.documentView = flipped
         scroll.translatesAutoresizingMaskIntoConstraints = false
-        outer.addArrangedSubview(scroll)
+
+        let customBox = ManageModelsWindowController.makeSectionBox()
+        let customInner = ManageModelsWindowController.innerStack(in: customBox)
+        customInner.addArrangedSubview(scroll)
         NSLayoutConstraint.activate([
-            scroll.widthAnchor.constraint(equalTo: outer.widthAnchor, constant: -40),
             scroll.heightAnchor.constraint(equalToConstant: 240),
+            scroll.widthAnchor.constraint(equalTo: customInner.widthAnchor),
             flipped.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)
         ])
-
-        // Fixed bottom area.
-        let divider = NSBox()
-        divider.boxType = .separator
-        outer.addArrangedSubview(divider)
-        divider.widthAnchor.constraint(equalTo: outer.widthAnchor,
-                                       constant: -40).isActive = true
+        outer.addArrangedSubview(customBox)
+        customBox.widthAnchor.constraint(equalTo: outer.widthAnchor,
+                                         constant: -40).isActive = true
 
         let customLabel = NSTextField(frame: .zero)
         customLabel.isEditable = false
@@ -348,6 +346,43 @@ private final class FlippedContainer: NSView {
     override var isFlipped: Bool { return true }
 }
 
+// MARK: - Section helpers
+
+extension ManageModelsWindowController {
+    // Creates a rounded, tinted container matching the section boxes in
+    // Preferences. Tagged with AppearanceManager.sectionBoxIdentifier so
+    // the walker refreshes the tint when the appearance mode changes.
+    fileprivate static func makeSectionBox() -> NSView {
+        let box = FlippedContainer()
+        box.translatesAutoresizingMaskIntoConstraints = false
+        box.wantsLayer = true
+        box.identifier = AppearanceManager.sectionBoxIdentifier
+        box.layer?.backgroundColor = AppearanceManager.shared.sectionBackgroundCGColor()
+        box.layer?.cornerRadius = 8
+        return box
+    }
+
+    // Creates a vertical stack view with Preferences-matching internal
+    // padding and attaches it to `box` so added content inherits the
+    // section's inset.
+    fileprivate static func innerStack(in box: NSView) -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: box.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: box.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: box.bottomAnchor)
+        ])
+        return stack
+    }
+}
+
 // MARK: - DotView
 
 private final class DotView: NSView {
@@ -420,8 +455,8 @@ private final class ModelRowView: NSView {
         nameLabel.stringValue = entry.displayName
         nameLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         sizeLabel.stringValue = ModelCatalog.formatBytes(entry.sizeBytes)
-        sizeLabel.textColor = .secondaryLabelColor
-        statusLabel.textColor = .secondaryLabelColor
+        sizeLabel.textColor = .labelColor
+        statusLabel.textColor = .labelColor
 
         progressBar.isIndeterminate = false
         progressBar.minValue = 0
@@ -498,6 +533,7 @@ private final class ModelRowView: NSView {
 
         if entry.isCustom {
             statusLabel.stringValue = "Downloaded"
+            statusLabel.textColor = .labelColor
             actionButton.title = "Delete"
             actionButton.isEnabled = true
             configureUseButton(available: true, isActive: isActive)

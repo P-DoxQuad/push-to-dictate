@@ -31,6 +31,7 @@ final class PreferencesWindowController: NSWindowController,
     }()
     private let autoUpdateFrequencyPopup = NSPopUpButton()
     private var autoUpdateFrequencyLabel: NSTextField?
+    private let appearanceModePopup = NSPopUpButton()
     private let releasesTable = NSTableView()
     private let releasesFetchButton: NSButton = {
         let b = NSButton(frame: .zero)
@@ -418,6 +419,7 @@ final class PreferencesWindowController: NSWindowController,
     func showPreferences() {
         if let window = window {
             if !window.isVisible { window.center() }
+            AppearanceManager.shared.applyToWindow(window)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -704,6 +706,9 @@ final class PreferencesWindowController: NSWindowController,
             pane.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
             pane.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor)
         ])
+        // If the theme changed while the user was on a different tab, this
+        // pane's cached views are stale. Re-theme on tab switch.
+        AppearanceManager.shared.applyToSubtree(pane)
     }
 
     // MARK: - Pane building
@@ -779,9 +784,11 @@ final class PreferencesWindowController: NSWindowController,
         let box = FlippedView()
         box.translatesAutoresizingMaskIntoConstraints = false
         box.wantsLayer = true
-        // Subtle version-safe tint: works on light and dark backgrounds
-        // without needing dynamic colors (which are 10.14+).
-        box.layer?.backgroundColor = NSColor(white: 0.0, alpha: 0.05).cgColor
+        // Tagged so AppearanceManager can find and re-tint on mode change.
+        // Shade is darker than the window bg in light mode, lighter than
+        // the window bg in dark mode.
+        box.identifier = AppearanceManager.sectionBoxIdentifier
+        box.layer?.backgroundColor = AppearanceManager.shared.sectionBackgroundCGColor()
         box.layer?.cornerRadius = 8
 
         let topPad: CGFloat = 12
@@ -937,12 +944,25 @@ final class PreferencesWindowController: NSWindowController,
         coloredStack.alignment = .leading
         coloredStack.spacing = 2
 
+        appearanceModePopup.removeAllItems()
+        appearanceModePopup.addItem(withTitle: "Follow System")
+        appearanceModePopup.addItem(withTitle: "Light")
+        appearanceModePopup.addItem(withTitle: "Dark")
+        appearanceModePopup.target = self
+        appearanceModePopup.action = #selector(appearanceModeChanged)
+
+        let appearanceModeRow = buildRowView(
+            labelText: "Light / Dark:", control: appearanceModePopup,
+            labelWidth: PreferencesWindowController.widestLabelWidth(["Light / Dark:"]))
+
+        let appearanceRows: [NSView] = [appearanceModeRow, coloredStack]
+
         let startup = buildSection(title: "Startup & Shortcut",
                                    rows: [hotkeyLabeledRow,
                                           modifierLegend,
                                           launchCheckbox])
         let appearance = buildSection(title: "Appearance",
-                                      rows: [coloredStack])
+                                      rows: appearanceRows)
         let settings = buildSection(title: "Settings",
                                     rows: [backupRow])
 
@@ -2072,6 +2092,11 @@ final class PreferencesWindowController: NSWindowController,
         case .atStartup: autoUpdateFrequencyPopup.selectItem(at: 0)
         case .daily:     autoUpdateFrequencyPopup.selectItem(at: 1)
         }
+        switch Preferences.shared.appearanceMode {
+        case .system: appearanceModePopup.selectItem(at: 0)
+        case .light:  appearanceModePopup.selectItem(at: 1)
+        case .dark:   appearanceModePopup.selectItem(at: 2)
+        }
         updateAutoUpdateControls()
         updateConditionalRows()
     }
@@ -2350,6 +2375,24 @@ final class PreferencesWindowController: NSWindowController,
     @objc private func coloredIconChanged() {
         Preferences.shared.useColoredMenuBarIcon = (coloredIconCheckbox.state == .on)
         onColoredIconChanged?()
+    }
+
+    @objc private func appearanceModeChanged() {
+        let mode: Preferences.AppearanceMode
+        switch appearanceModePopup.indexOfSelectedItem {
+        case 1:  mode = .light
+        case 2:  mode = .dark
+        default: mode = .system
+        }
+        Preferences.shared.appearanceMode = mode
+        AppearanceManager.shared.apply()
+        // Also re-apply to this window immediately so pre-Mojave colors take
+        // effect without waiting for a focus change.
+        if let w = window { AppearanceManager.shared.applyToWindow(w) }
+        // Category panes are built upfront and cached but only one is in the
+        // view hierarchy at a time. Re-theme all of them so a tab switch
+        // shows the right colors.
+        for pane in categoryViews { AppearanceManager.shared.applyToSubtree(pane) }
     }
 
     @objc private func threadsStepperChanged() {
@@ -2680,6 +2723,7 @@ final class PreferencesWindowController: NSWindowController,
         controller.onDidChange = { [weak self] in self?.refreshModelPopup() }
         controller.refreshAll()
         guard let sheet = controller.window, let parent = window else { return }
+        AppearanceManager.shared.applyToWindow(sheet)
         parent.beginSheet(sheet) { [weak self] _ in
             self?.refreshModelPopup()
         }

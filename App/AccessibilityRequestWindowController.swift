@@ -40,6 +40,7 @@ final class AccessibilityRequestWindowController: NSWindowController, NSWindowDe
         controller.onTrustGranted = onTrustGranted
         controller.onMenuShouldRefresh = onMenuShouldRefresh
         active = controller
+        if let w = controller.window { AppearanceManager.shared.applyToWindow(w) }
         controller.showWindow(nil)
         controller.window?.center()
         NSApp.activate(ignoringOtherApps: true)

@@ -58,6 +58,7 @@ final class Preferences {
         static let applyTextSubstitutions = "applyTextSubstitutions"
         static let capitalizeFirstLetterAtLineStart = "capitalizeFirstLetterAtLineStart"
         static let filterConsecutiveDuplicates = "filterConsecutiveDuplicates"
+        static let appearanceMode = "appearanceMode"
     }
 
     static let noSoundName = "None"
@@ -536,6 +537,23 @@ final class Preferences {
         case daily
     }
 
+    // Controls the app's window appearance. `.system` defers to the OS-level
+    // setting (on 10.14+). On pre-Mojave, `.system` resolves to light because
+    // the OS had no dark mode. `.light` and `.dark` are explicit overrides.
+    enum AppearanceMode: String {
+        case system
+        case light
+        case dark
+    }
+
+    var appearanceMode: AppearanceMode {
+        get {
+            let raw = defaults.string(forKey: Key.appearanceMode) ?? ""
+            return AppearanceMode(rawValue: raw) ?? .system
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.appearanceMode) }
+    }
+
     var autoUpdateCheckFrequency: AutoUpdateCheckFrequency {
         get {
             let stored = defaults.string(forKey: Key.autoUpdateCheckFrequency) ?? ""
@@ -694,7 +712,8 @@ final class Preferences {
         Key.applyProperNounFixups,
         Key.applyTextSubstitutions,
         Key.capitalizeFirstLetterAtLineStart,
-        Key.filterConsecutiveDuplicates
+        Key.filterConsecutiveDuplicates,
+        Key.appearanceMode
     ]
 
     // MARK: - Keychain

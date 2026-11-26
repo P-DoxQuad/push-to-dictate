@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         maybeAutoSelectModel()
+        AppearanceManager.shared.apply()
         maybePromptMoveToApplications()
         statusController = StatusItemController()
         setupAutomaticUpdateChecks()

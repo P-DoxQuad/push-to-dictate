@@ -21,6 +21,7 @@ final class HelpWindowController: NSWindowController {
 
     func show() {
         textView?.textStorage?.setAttributedString(HelpWindowController.helpContent())
+        if let w = window { AppearanceManager.shared.applyToWindow(w) }
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

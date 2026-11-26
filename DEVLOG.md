@@ -1472,3 +1472,52 @@ Content rewritten end-to-end in formal English with full sentences. Every tunabl
 - **Menu-bar tooltip** now reads `Push to Dictate\nHotkey: Control+Option+Space`, refreshed via `refreshMenuBarToolTip()` from `applyHotkeySettings()` so it updates immediately when the hotkey is rebound.
 - **Preferences hotkey row** status label now shows the verbose current hotkey when idle (populated by `refreshHotkeyButton`). Transient `Saved.` / `Cancelled.` / clear overrides removed; the verbose name is the confirmation itself, alongside the symbolic form on the button.
 - **Modifier legend caption** added under the hotkey row in Preferences → General → Startup & Shortcut: `Modifiers: ⌃ Control, ⌥ Option, ⇧ Shift, ⌘ Command.` Point-of-use placement replaces an earlier attempt to put the legend in the Help window body, which was disjointed.
+
+#### Appearance mode: light, dark, or follow system
+
+New preference `appearanceMode: AppearanceMode` (enum: `system`, `light`, `dark`, default `.system`). Controls the appearance of every app window independently of the menu-bar icon (which still has its own "Use colored menu bar icon" toggle and `isDarkMenuBar` detection path).
+
+UI: new popup in Preferences → General → Appearance, labelled `Light / Dark:`, with items `Follow System / Light / Dark`.
+
+**`App/AppearanceManager.swift`.** New singleton `AppearanceManager` is the sole owner of appearance application. Exposes `apply()` (call on launch and on preference change), `applyToWindow(_:)` (call just before a new window is shown), and `applyToSubtree(_:)` (for view hierarchies that are cached off-window).
+
+**10.14+ path.** `NSApp.appearance` is set to `.aqua`, `.darkAqua`, or `nil` depending on preference. AppKit's cascade handles every window, every dynamic color (`.labelColor`, `.windowBackgroundColor`, etc.), and every control's rendering. `NSApp.effectiveAppearance` is observed via KVO so `Follow System` picks up live system light/dark flips (the dynamic-color cascade adapts automatically, but static layer tints need a manual re-apply).
+
+**Pre-Mojave path.** `NSApp.appearance` does not exist before 10.14 and is wrapped in `@available(macOS 10.14, *)`. For pre-Mojave, appearance is set on each window individually via `NSWindow.appearance` (`.vibrantDark` for dark, `.aqua` for light). The content view is then walked:
+
+- Window `backgroundColor` is set to `NSColor(white: 0.18, alpha: 1)` in dark mode and `.windowBackgroundColor` in light.
+- Every non-editable `NSTextField` (labels, captions, hints) has its `textColor` overridden to a primary or secondary color appropriate to the mode. Editable fields keep their native `textColor`. `NSTableView` subtrees are skipped so per-row cell colors (blue "installed" badge, sidebar selection) stay intact. `NSScrollView` subtrees are explicitly not skipped; every preference pane lives inside one.
+- Section container tints are updated by finding every subview tagged with `AppearanceManager.sectionBoxIdentifier`. In light mode the tint is `white: 0.0, alpha: 0.05` (unchanged). In dark mode the tint is `white: 1.0, alpha: 0.15`, which produces an effective `~#4D4D4D` against the `#2E2E2E` window background. The value was arrived at by sampling a `.rounded` push-button on screen (fill color `#3C3C3C`); the previous 0.08 alpha produced `~#3F3F3F`, collapsing into the button and making buttons disappear visually inside sections.
+
+Follow System detection on pre-Mojave reads the `AppleInterfaceStyle` key from `NSGlobalDomain` (same path `StatusItemController.isDarkMenuBar` uses). Live updates are delivered via `DistributedNotificationCenter` on `AppleInterfaceThemeChangedNotification`.
+
+**Section tagging and the walker.** `PreferencesWindowController.buildSection` tags each box container with `AppearanceManager.sectionBoxIdentifier` and initialises its `layer.backgroundColor` from `AppearanceManager.shared.sectionBackgroundCGColor()`. The walker in `AppearanceManager.walkAndTintSections` finds these tagged boxes on every `apply()` and re-tints them. This covers the layer-backed tint which doesn't adapt automatically on 10.14+ and doesn't exist at all on pre-Mojave.
+
+**Off-window panes.** Preference tabs are built eagerly and cached in `categoryViews`, but only the currently-selected pane is in the view hierarchy. `appearanceModeChanged` iterates every cached pane and calls `AppearanceManager.shared.applyToSubtree(pane)`. `showCategory` also calls `applyToSubtree` on the pane being inserted, so even if the theme flipped via notification while another tab was active, switching tabs yields correct colors.
+
+**Per-window entry points.** `HelpWindowController.show()`, `AccessibilityRequestWindowController.present(...)`, `PreferencesWindowController.showPreferences()`, and the Manage Models sheet opener each call `AppearanceManager.shared.applyToWindow(_:)` just before the window becomes visible, so pre-Mojave windows pick up the current mode without a visible flash.
+
+**AppDelegate.** `applicationDidFinishLaunching` calls `AppearanceManager.shared.apply()` before the status item is created and before the move-to-Applications prompt.
+
+**Xcode project.** Three new pbxproj entries for `App/AppearanceManager.swift`: build file, file reference, App group membership, Sources build phase.
+
+#### Manage Models window: Preferences-style section containers
+
+The Models sheet was a flat vertical stack of catalog rows, a divider, custom-models header, a scroll, more dividers, and the custom download row. Rebuilt to use the same two-tier visual as the Preferences panes:
+
+- "Available transcription models" header, then a single rounded section box containing all catalog `ModelRowView` entries, with the same 12/14-point internal padding `buildSection` uses.
+- "Custom models" header, then a single rounded section box containing the scrollable list of downloaded extras.
+- The `NSBox` separators between sections are gone; the boxes provide their own visual separation.
+- The scroll view inside the custom box switched from `.bezelBorder` to `.noBorder` so it doesn't double-outline inside its section.
+- Each section box is tagged with `AppearanceManager.sectionBoxIdentifier` and picks up the appearance walker's tint on light/dark changes.
+- `ModelRowView` remains a plain view; the earlier experiment that tagged each row as its own section is reverted.
+
+Two small inline helpers added at file scope: `makeSectionBox()` returns the tagged, layer-backed container; `innerStack(in:)` creates the inset vertical stack and pins it to the box. Keeps the call site in `buildLayout` compact without pulling the Preferences `buildSection` method out of the controller it belongs to.
+
+#### Hotkey verbose names: minor polish
+
+(Already in the prior commit; included here for traceability.) `describeVerbose(keyCode:flags:)` returns spelled-out modifier names (`Control+Option+Space`). The menu-bar tooltip and the Preferences hotkey status label use the verbose form. A modifier legend caption (`⌃ Control, ⌥ Option, ⇧ Shift, ⌘ Command`) sits under the hotkey row.
+
+#### Manage Models text colors
+
+`sizeLabel` and `statusLabel` in `ModelRowView` were both using `.secondaryLabelColor`. Changed to `.labelColor` so size and the custom "Downloaded" status match the primary name text. Catalog rows still use the semantic recommendation palette (`.systemGreen`, `.systemYellow`, `.systemRed`) for the rating; that's not a style choice and stays.
