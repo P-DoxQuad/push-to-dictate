@@ -15,8 +15,6 @@ struct ReleaseInfo {
 }
 
 enum UpdateChecker {
-    private static let releasesAPIURL =
-        URL(string: "https://api.github.com/repos/P-DoxQuad/push-to-dictate/releases/latest")!
     private static let allReleasesAPIURL =
         URL(string: "https://api.github.com/repos/P-DoxQuad/push-to-dictate/releases")!
     private static let releasesPageURL =
@@ -48,53 +46,29 @@ enum UpdateChecker {
             return
         }
 
-        var request = URLRequest(url: releasesAPIURL)
-        request.timeoutInterval = requestTimeout
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            let result = parseResponse(current: current,
-                                       data: data,
-                                       response: response,
-                                       error: error)
-            DispatchQueue.main.async { completion(result) }
-        }
-        task.resume()
-    }
-
-    private static func parseResponse(current: String,
-                                      data: Data?,
-                                      response: URLResponse?,
-                                      error: Error?) -> UpdateCheckResult {
-        if let error = error {
-            return .error("Couldn't reach GitHub: \(error.localizedDescription)")
-        }
-        guard let http = response as? HTTPURLResponse else {
-            return .error("Couldn't reach GitHub.")
-        }
-        guard http.statusCode == 200 else {
-            return .error("GitHub returned status \(http.statusCode).")
-        }
-        guard let data = data,
-              let json = try? JSONSerialization.jsonObject(with: data, options: []),
-              let dict = json as? [String: Any] else {
-            return .error("Could not parse release metadata.")
-        }
-        guard let tag = dict["tag_name"] as? String,
-              let htmlURLString = dict["html_url"] as? String,
-              let htmlURL = URL(string: htmlURLString) else {
-            return .error("Release metadata missing tag or URL.")
-        }
-
-        let latest = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
-        let downloadURL = pickFullAssetURL(from: dict["assets"])
-
-        switch compareVersions(latest, current) {
-        case .orderedDescending:
-            return .updateAvailable(current: current, latest: latest,
-                                    releaseURL: htmlURL, downloadURL: downloadURL)
-        case .orderedSame, .orderedAscending:
-            return .upToDate(current: current)
+        // Use the full /releases endpoint (not /releases/latest) so model-
+        // asset releases and other non-app releases can be filtered out
+        // client-side via the CalVer tag check in fetchAllReleases. The
+        // first element of the filtered list is the latest app release.
+        fetchAllReleases { releases, errorMessage in
+            if let msg = errorMessage {
+                completion(.error(msg))
+                return
+            }
+            guard let latest = releases?.first else {
+                completion(.upToDate(current: current))
+                return
+            }
+            switch compareVersions(latest.version, current) {
+            case .orderedDescending:
+                completion(.updateAvailable(
+                    current: current,
+                    latest: latest.version,
+                    releaseURL: latest.releaseURL,
+                    downloadURL: latest.downloadURL))
+            case .orderedSame, .orderedAscending:
+                completion(.upToDate(current: current))
+            }
         }
     }
 
@@ -146,6 +120,10 @@ enum UpdateChecker {
                   let htmlURLString = dict["html_url"] as? String,
                   let htmlURL = URL(string: htmlURLString) else { continue }
             let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+            // Exclude non-app releases (e.g. model-asset distributions
+            // published under the same repo). App releases are tagged as
+            // CalVer YYYY.MM.PATCH or YYYY.MM.PATCH.N.
+            if !isAppVersionTag(version) { continue }
             var pubDate: Date? = nil
             if let s = dict["published_at"] as? String {
                 pubDate = isoFmt.date(from: s)
@@ -157,6 +135,25 @@ enum UpdateChecker {
                                    downloadURL: dl))
         }
         return (out, nil)
+    }
+
+    // True when the stripped-tag text matches the app's CalVer pattern:
+    // YYYY.MM.PATCH, optionally with a fourth .N for same-version respins.
+    // Year is four digits, month is one or two, patch is one or more.
+    private static func isAppVersionTag(_ s: String) -> Bool {
+        let parts = s.split(separator: ".")
+        guard parts.count == 3 || parts.count == 4 else { return false }
+        func isPositiveInt(_ p: Substring, width: ClosedRange<Int>) -> Bool {
+            guard width.contains(p.count) else { return false }
+            return p.allSatisfy { $0 >= "0" && $0 <= "9" }
+        }
+        guard isPositiveInt(parts[0], width: 4...4) else { return false }
+        guard isPositiveInt(parts[1], width: 1...2) else { return false }
+        guard isPositiveInt(parts[2], width: 1...3) else { return false }
+        if parts.count == 4 {
+            guard isPositiveInt(parts[3], width: 1...3) else { return false }
+        }
+        return true
     }
 
     // Pick the single asset whose filename ends with "-Full.zip". Zero or

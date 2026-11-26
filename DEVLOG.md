@@ -1521,3 +1521,9 @@ Two small inline helpers added at file scope: `makeSectionBox()` returns the tag
 #### Manage Models text colors
 
 `sizeLabel` and `statusLabel` in `ModelRowView` were both using `.secondaryLabelColor`. Changed to `.labelColor` so size and the custom "Downloaded" status match the primary name text. Catalog rows still use the semantic recommendation palette (`.systemGreen`, `.systemYellow`, `.systemRed`) for the rating; that's not a style choice and stays.
+
+#### Updates tab: filter to app releases only
+
+`UpdateChecker.parseAllReleases` now drops any release whose stripped tag doesn't match the app's CalVer pattern (`YYYY.MM.PATCH[.N]`). Non-app releases published to the same repo (model-asset distributions, etc.) no longer appear in the Updates tab's release history or in the auto-update latest check. New helper `isAppVersionTag(_:)` does the digits-and-dots validation without a regex (Swift 4.2).
+
+`UpdateChecker.checkForUpdates` was moved off `/releases/latest` and onto `fetchAllReleases`, taking the first filtered entry as the latest. This way the auto-check and the Updates tab share one filter: if the most-recent repo tag is a model drop, the auto-check ignores it instead of comparing against it. The now-unused `releasesAPIURL` constant pointing at `/releases/latest` is removed.
