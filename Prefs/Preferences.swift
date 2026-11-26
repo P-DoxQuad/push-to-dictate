@@ -54,10 +54,8 @@ final class Preferences {
         static let transcriptProcessingEnabled = "transcriptProcessingEnabled"
         static let removeNonSpeechAnnotations = "removeNonSpeechAnnotations"
         static let normalizeCapitalization = "normalizeCapitalization"
-        static let applyProperNounFixups = "applyProperNounFixups"
         static let applyTextSubstitutions = "applyTextSubstitutions"
         static let capitalizeFirstLetterAtLineStart = "capitalizeFirstLetterAtLineStart"
-        static let filterConsecutiveDuplicates = "filterConsecutiveDuplicates"
         static let appearanceMode = "appearanceMode"
     }
 
@@ -329,14 +327,6 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.normalizeCapitalization) }
     }
 
-    var applyProperNounFixups: Bool {
-        get {
-            if defaults.object(forKey: Key.applyProperNounFixups) == nil { return true }
-            return defaults.bool(forKey: Key.applyProperNounFixups)
-        }
-        set { defaults.set(newValue, forKey: Key.applyProperNounFixups) }
-    }
-
     var applyTextSubstitutions: Bool {
         get {
             if defaults.object(forKey: Key.applyTextSubstitutions) == nil { return true }
@@ -351,14 +341,6 @@ final class Preferences {
             return defaults.bool(forKey: Key.capitalizeFirstLetterAtLineStart)
         }
         set { defaults.set(newValue, forKey: Key.capitalizeFirstLetterAtLineStart) }
-    }
-
-    var filterConsecutiveDuplicates: Bool {
-        get {
-            if defaults.object(forKey: Key.filterConsecutiveDuplicates) == nil { return true }
-            return defaults.bool(forKey: Key.filterConsecutiveDuplicates)
-        }
-        set { defaults.set(newValue, forKey: Key.filterConsecutiveDuplicates) }
     }
 
     // Words / tokens that the post-processing casing normalizer would
@@ -709,10 +691,8 @@ final class Preferences {
         Key.transcriptProcessingEnabled,
         Key.removeNonSpeechAnnotations,
         Key.normalizeCapitalization,
-        Key.applyProperNounFixups,
         Key.applyTextSubstitutions,
         Key.capitalizeFirstLetterAtLineStart,
-        Key.filterConsecutiveDuplicates,
         Key.appearanceMode
     ]
 

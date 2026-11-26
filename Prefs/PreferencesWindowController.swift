@@ -332,12 +332,6 @@ final class PreferencesWindowController: NSWindowController,
         b.title = "Normalize capitalization"
         return b
     }()
-    private let applyProperNounFixupsCheckbox: NSButton = {
-        let b = NSButton(frame: .zero)
-        b.setButtonType(.switch)
-        b.title = "Capitalize nouns"
-        return b
-    }()
     private let applyTextSubstitutionsCheckbox: NSButton = {
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
@@ -348,12 +342,6 @@ final class PreferencesWindowController: NSWindowController,
         let b = NSButton(frame: .zero)
         b.setButtonType(.switch)
         b.title = "Capitalize first letter at line start"
-        return b
-    }()
-    private let filterDuplicatesCheckbox: NSButton = {
-        let b = NSButton(frame: .zero)
-        b.setButtonType(.switch)
-        b.title = "Filter consecutive duplicate words"
         return b
     }()
 
@@ -544,14 +532,10 @@ final class PreferencesWindowController: NSWindowController,
         removeNonSpeechAnnotationsCheckbox.action = #selector(removeNonSpeechAnnotationsChanged)
         normalizeCapitalizationCheckbox.target = self
         normalizeCapitalizationCheckbox.action = #selector(normalizeCapitalizationChanged)
-        applyProperNounFixupsCheckbox.target = self
-        applyProperNounFixupsCheckbox.action = #selector(applyProperNounFixupsChanged)
         applyTextSubstitutionsCheckbox.target = self
         applyTextSubstitutionsCheckbox.action = #selector(applyTextSubstitutionsChanged)
         capitalizeFirstLetterCheckbox.target = self
         capitalizeFirstLetterCheckbox.action = #selector(capitalizeFirstLetterChanged)
-        filterDuplicatesCheckbox.target = self
-        filterDuplicatesCheckbox.action = #selector(filterDuplicatesChanged)
         continuousSentencePauseMaxField.delegate = self
         continuousSentencePauseMaxStepper.minValue = 0.2
         continuousSentencePauseMaxStepper.maxValue = 10.0
@@ -1445,13 +1429,6 @@ final class PreferencesWindowController: NSWindowController,
             "Turn off to preserve whisper's casing as-is, for example " +
             "when dictating code.")
 
-        let fixupsHelp = HelpButton(text:
-            "Re-capitalizes known proper nouns and brand names after " +
-            "normalization (\"john\" to \"John\", \"macos\" to " +
-            "\"macOS\").\n\n" +
-            "Covers common names, major cities, US states, Canadian " +
-            "provinces, and tech brands.")
-
         let substitutionsHelp = HelpButton(text:
             "Rewrites spoken forms to canonical capitalized " +
             "abbreviations and multi-word brand names (\"megabytes\" " +
@@ -1475,20 +1452,10 @@ final class PreferencesWindowController: NSWindowController,
             views: [removeNonSpeechAnnotationsCheckbox, removeAnnotationsHelp], indent: indent)
         let normalizeCapRow = makeIndentedRow(
             views: [normalizeCapitalizationCheckbox, normalizeCapHelp], indent: indent)
-        let fixupsRow = makeIndentedRow(
-            views: [applyProperNounFixupsCheckbox, fixupsHelp], indent: indent)
         let substitutionsRow = makeIndentedRow(
             views: [applyTextSubstitutionsCheckbox, substitutionsHelp], indent: indent)
         let firstLetterRow = makeIndentedRow(
             views: [capitalizeFirstLetterCheckbox, firstLetterHelp], indent: indent)
-
-        let filterDuplicatesHelp = HelpButton(text:
-            "Collapses adjacent identical words separated only by a " +
-            "space (\"I I think\" to \"I think\").\n\n" +
-            "Words separated by punctuation are left intact " +
-            "(\"very, very good\").")
-        let filterDuplicatesRow = makeIndentedRow(
-            views: [filterDuplicatesCheckbox, filterDuplicatesHelp], indent: indent)
 
         let performance = buildSection(title: "Performance",
                                        rows: [threadsRow, beamRow])
@@ -1498,10 +1465,8 @@ final class PreferencesWindowController: NSWindowController,
                                       rows: [processingRootRow,
                                              removeAnnotationsRow,
                                              normalizeCapRow,
-                                             fixupsRow,
                                              substitutionsRow,
-                                             firstLetterRow,
-                                             filterDuplicatesRow])
+                                             firstLetterRow])
         let reset = buildSection(title: "Reset", rows: [resetStack])
 
         let inset = PreferencesWindowController.paneInset
@@ -2078,14 +2043,10 @@ final class PreferencesWindowController: NSWindowController,
             Preferences.shared.removeNonSpeechAnnotations ? .on : .off
         normalizeCapitalizationCheckbox.state =
             Preferences.shared.normalizeCapitalization ? .on : .off
-        applyProperNounFixupsCheckbox.state =
-            Preferences.shared.applyProperNounFixups ? .on : .off
         applyTextSubstitutionsCheckbox.state =
             Preferences.shared.applyTextSubstitutions ? .on : .off
         capitalizeFirstLetterCheckbox.state =
             Preferences.shared.capitalizeFirstLetterAtLineStart ? .on : .off
-        filterDuplicatesCheckbox.state =
-            Preferences.shared.filterConsecutiveDuplicates ? .on : .off
         autoUpdateCheckbox.state =
             Preferences.shared.autoUpdateCheckEnabled ? .on : .off
         switch Preferences.shared.autoUpdateCheckFrequency {
@@ -2211,10 +2172,8 @@ final class PreferencesWindowController: NSWindowController,
         let enabled = transcriptProcessingCheckbox.state == .on
         removeNonSpeechAnnotationsCheckbox.isEnabled = enabled
         normalizeCapitalizationCheckbox.isEnabled = enabled
-        applyProperNounFixupsCheckbox.isEnabled = enabled
         applyTextSubstitutionsCheckbox.isEnabled = enabled
         capitalizeFirstLetterCheckbox.isEnabled = enabled
-        filterDuplicatesCheckbox.isEnabled = enabled
     }
 
     private func updateSilenceDetectionControls() {
@@ -2457,11 +2416,6 @@ final class PreferencesWindowController: NSWindowController,
             (normalizeCapitalizationCheckbox.state == .on)
     }
 
-    @objc private func applyProperNounFixupsChanged() {
-        Preferences.shared.applyProperNounFixups =
-            (applyProperNounFixupsCheckbox.state == .on)
-    }
-
     @objc private func applyTextSubstitutionsChanged() {
         Preferences.shared.applyTextSubstitutions =
             (applyTextSubstitutionsCheckbox.state == .on)
@@ -2470,11 +2424,6 @@ final class PreferencesWindowController: NSWindowController,
     @objc private func capitalizeFirstLetterChanged() {
         Preferences.shared.capitalizeFirstLetterAtLineStart =
             (capitalizeFirstLetterCheckbox.state == .on)
-    }
-
-    @objc private func filterDuplicatesChanged() {
-        Preferences.shared.filterConsecutiveDuplicates =
-            (filterDuplicatesCheckbox.state == .on)
     }
 
     @objc private func typedDelayStepperChanged() {

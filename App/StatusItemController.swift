@@ -878,9 +878,10 @@ final class StatusItemController: NSObject,
         if prefs.normalizeCapitalization {
             out = normalizeCasing(out)
         }
-        if prefs.applyProperNounFixups {
-            out = applyCapitalizationFixups(out)
-        }
+        // Proper-noun fixups run unconditionally as part of the pipeline;
+        // no longer user-toggleable. Still gated by the parent
+        // transcriptProcessingEnabled check at the top of this function.
+        out = applyCapitalizationFixups(out)
         if prefs.applyTextSubstitutions {
             out = applyTextSubstitutions(out)
         }
@@ -1060,9 +1061,7 @@ final class StatusItemController: NSObject,
                 //    drop it. Catches cases where overlap dedup missed a
                 //    duplicate because whisper rendered the overlapped
                 //    word differently in each chunk.
-                if prefs.transcriptProcessingEnabled
-                    && prefs.filterConsecutiveDuplicates
-                    && !cleaned.isEmpty {
+                if prefs.transcriptProcessingEnabled && !cleaned.isEmpty {
                     let beforeInner = cleaned
                     cleaned = StatusItemController.filterConsecutiveDuplicates(cleaned)
                     if cleaned != beforeInner {
@@ -1076,6 +1075,17 @@ final class StatusItemController: NSObject,
                             .trimmingCharacters(in: .whitespaces)
                         Logger.info("continuous: duplicate filter dropped cross-chunk repeat of \(prev)")
                         cleaned = remaining
+                    }
+                }
+                // Continuous-mode chunking sometimes produces ". And " at a
+                // chunk boundary where the two clauses are really one
+                // thought. Rewrite to ", and " per Chicago / AP style for
+                // independent clauses joined by a coordinating conjunction.
+                if prefs.transcriptProcessingEnabled && !cleaned.isEmpty {
+                    let beforeJoin = cleaned
+                    cleaned = StatusItemController.joinAndAfterPeriod(cleaned)
+                    if cleaned != beforeJoin {
+                        Logger.info("continuous: rewrote '. And' to ', and'")
                     }
                 }
                 var injectedForDebug = ""
@@ -1291,6 +1301,20 @@ final class StatusItemController: NSObject,
     // on alphanumeric runs. Handles arbitrarily long runs ("no no no" →
     // "no"). Preserves inter-word non-whitespace content, so "very, very
     // good" is left intact: the comma indicates deliberate emphasis.
+    // Replaces every occurrence of ". And" (word-bounded on the right)
+    // with ", and". Targets the continuous-dictation chunking artifact
+    // where a pause between related clauses produces a false sentence
+    // break before "And". Comma + lowercase "and" joins the two clauses
+    // per standard style guidance for coordinating conjunctions.
+    static func joinAndAfterPeriod(_ text: String) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: "\\. And\\b", options: []) else { return text }
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        return regex.stringByReplacingMatches(
+            in: text, options: [], range: range, withTemplate: ", and")
+    }
+
     static func filterConsecutiveDuplicates(_ text: String) -> String {
         var result = String()
         result.reserveCapacity(text.count)

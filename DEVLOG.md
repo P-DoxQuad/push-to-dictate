@@ -1527,3 +1527,11 @@ Two small inline helpers added at file scope: `makeSectionBox()` returns the tag
 `UpdateChecker.parseAllReleases` now drops any release whose stripped tag doesn't match the app's CalVer pattern (`YYYY.MM.PATCH[.N]`). Non-app releases published to the same repo (model-asset distributions, etc.) no longer appear in the Updates tab's release history or in the auto-update latest check. New helper `isAppVersionTag(_:)` does the digits-and-dots validation without a regex (Swift 4.2).
 
 `UpdateChecker.checkForUpdates` was moved off `/releases/latest` and onto `fetchAllReleases`, taking the first filtered entry as the latest. This way the auto-check and the Updates tab share one filter: if the most-recent repo tag is a model drop, the auto-check ignores it instead of comparing against it. The now-unused `releasesAPIURL` constant pointing at `/releases/latest` is removed.
+
+#### Continuous dictation: join clauses on ". And"
+
+Added `StatusItemController.joinAndAfterPeriod(_:)` using `NSRegularExpression` with `\. And\b`, replacing matches with `, and`. Called in `handleContinuousResult` after the duplicate filter, gated on `prefs.transcriptProcessingEnabled`. Targets the chunking artifact where a pause between related clauses produces a false sentence break before "And". Per Chicago / AP style for independent clauses joined by a coordinating conjunction.
+
+#### Transcript Processing: hide proper-noun and duplicate-filter toggles
+
+Removed the user-facing **Capitalize nouns** and **Filter consecutive duplicate words** checkboxes from Preferences → Advanced → Transcript Processing. Both passes still run — unconditionally when the parent **Apply transcript processing** is on, and not at all when it's off. Deleted `applyProperNounFixups` and `filterConsecutiveDuplicates` from `Preferences` (property, `Key` entry, `allUserDefaultsKeys` entry). Removed the matching checkbox declarations, help popovers, row layout, `refreshAll` state restoration, parent-enable toggling, and action handlers from `PreferencesWindowController`. In `StatusItemController`, the per-pref gating on each pass was dropped; the parent-toggle check at the top of `postProcessTranscript` (and surrounding the continuous-mode duplicate + join-and blocks) is the sole gate.
