@@ -925,6 +925,9 @@ final class PreferencesWindowController: NSWindowController,
         let hotkeyLabeledRow = buildRowView(labelText: "Hotkey:",
                                             control: hotkeyRow, labelWidth: lw)
 
+        let modifierLegend = PreferencesWindowController.makeCaption(
+            "Modifiers: ⌃ Control, ⌥ Option, ⇧ Shift, ⌘ Command.")
+
         let coloredStack = NSStackView(views: [
             coloredIconCheckbox,
             PreferencesWindowController.makeCaption(
@@ -935,7 +938,9 @@ final class PreferencesWindowController: NSWindowController,
         coloredStack.spacing = 2
 
         let startup = buildSection(title: "Startup & Shortcut",
-                                   rows: [hotkeyLabeledRow, launchCheckbox])
+                                   rows: [hotkeyLabeledRow,
+                                          modifierLegend,
+                                          launchCheckbox])
         let appearance = buildSection(title: "Appearance",
                                       rows: [coloredStack])
         let settings = buildSection(title: "Settings",
@@ -970,19 +975,12 @@ final class PreferencesWindowController: NSWindowController,
         let thresholdHint = PreferencesWindowController.makeHint(
             "RMS · default 0.0100")
         let thresholdHelp = HelpButton(text:
-            "How quiet the microphone needs to be before the app counts " +
-            "it as silence.\n\n" +
-            "The number is an audio loudness measure (RMS). Lower = the " +
-            "app treats quieter sounds as still being speech. Higher = " +
-            "only loud audio counts as speech, and anything softer is " +
-            "silence.\n\n" +
-            "Used by both auto-stop (standard mode) and chunk detection " +
-            "(continuous mode) because \"what counts as silent\" is one " +
-            "idea.\n\n" +
-            "Example: if auto-stop fires while you're still talking, " +
-            "your speech is dipping below this value - lower it (e.g. " +
-            "0.0050). If auto-stop never fires when you stop talking, " +
-            "background noise is above it - raise it (e.g. 0.0200).")
+            "Loudness threshold (RMS) below which microphone input is " +
+            "classified as silence.\n\n" +
+            "Lower = quieter sounds count as speech.\n" +
+            "Higher = only louder audio counts as speech.\n\n" +
+            "Used by Auto stop (standard mode) and chunk detection " +
+            "(continuous mode).")
         let thresholdControl = NSStackView(views: [
             silenceThresholdField, silenceThresholdStepper, thresholdHint, thresholdHelp
         ])
@@ -996,14 +994,10 @@ final class PreferencesWindowController: NSWindowController,
         let secondsHint = PreferencesWindowController.makeHint(
             "seconds · default 4.0")
         let secondsHelp = HelpButton(text:
-            "How long silence must last before Auto stop ends the " +
-            "recording.\n\n" +
-            "Only used when Auto stop is on. The timer starts the moment " +
-            "the microphone drops below the Silence level above, and " +
-            "resets any time it goes back above.\n\n" +
-            "Example: with 4.0 seconds, if you stop talking for 4 full " +
-            "seconds, the app finalizes your dictation. A 3-second " +
-            "thinking pause mid-sentence won't stop it.")
+            "Duration of continuous silence required before Auto stop " +
+            "ends the recording.\n\n" +
+            "Active only when Auto stop is on. The timer resets any " +
+            "time the microphone rises above Silence level.")
         let secondsControl = NSStackView(views: [
             silenceSecondsField, silenceSecondsStepper, secondsHint, secondsHelp
         ])
@@ -1038,8 +1032,8 @@ final class PreferencesWindowController: NSWindowController,
              "Max chars:"])
 
         let backendHelp = HelpButton(text:
-            "whisper.cpp (local): runs on your Mac. Audio stays on " +
-            "this computer. Works offline. No ongoing cost.\n\n" +
+            "whisper.cpp (local): runs on the local machine. Audio does " +
+            "not leave the computer. Works offline. No ongoing cost.\n\n" +
             "OpenAI API: runs on OpenAI's servers. Audio is sent over " +
             "the internet. Requires an API key. Billed per minute.")
         let backendControl = NSStackView(views: [backendPopup, backendHelp])
@@ -1069,20 +1063,13 @@ final class PreferencesWindowController: NSWindowController,
                                            control: modelsFolderControl, labelWidth: lw)
 
         let continuousHelp = HelpButton(text:
-            "A mode that transcribes while you talk, streaming text " +
-            "into your document in chunks instead of waiting for you " +
-            "to finish.\n\n" +
-            "Each natural pause produces another chunk of text. Longer " +
-            "pauses are treated as sentence breaks (period + capital), " +
-            "shorter pauses as continuations.\n\n" +
-            "Only works in toggle mode: press the hotkey once to start " +
-            "the session, press again to end it. Not usable in " +
-            "push-to-talk mode since the session ends the moment you " +
-            "release the key.\n\n" +
-            "Still being refined. The settings below control how it " +
-            "decides where one phrase ends and the next begins. Expect " +
-            "occasional misfires on noisy audio or unusually long " +
-            "run-on sentences.")
+            "Experimental.\n\n" +
+            "Transcribes during speech, streaming text into the active " +
+            "field in chunks instead of waiting for the recording to " +
+            "end. Longer pauses become sentence breaks; shorter pauses " +
+            "become continuations.\n\n" +
+            "Available in Toggle mode only. In Push-to-Talk mode the " +
+            "session ends on key release.")
         let continuousStack = NSStackView(views: [
             continuousDictationCheckbox,
             continuousHelp
@@ -1095,18 +1082,13 @@ final class PreferencesWindowController: NSWindowController,
         let pauseHint = PreferencesWindowController.makeHint(
             "seconds · default 1.0")
         let pauseHelp = HelpButton(text:
-            "How long you need to pause before the app sends what you " +
-            "just said off to be transcribed. A pause this long or " +
-            "longer also counts as the end of a sentence, so the next " +
-            "thing you say gets a period and a capital letter in front " +
-            "of it.\n\n" +
-            "Shorter = text shows up sooner, but short mid-thought " +
-            "breaths are more likely to get treated as sentence endings. " +
-            "Longer = text takes longer to appear, and you can pause " +
-            "briefly without it starting a new sentence.\n\n" +
-            "Example: with 1.0 second, a quick breath between words " +
-            "stays part of the same thought; pausing a full second " +
-            "between phrases starts a new sentence.")
+            "Minimum pause before the current phrase is sent for " +
+            "transcription. A pause at or above this length also ends " +
+            "a sentence.\n\n" +
+            "Lower = text appears sooner, short breaths more likely " +
+            "to end sentences.\n" +
+            "Higher = text appears later, short pauses do not split " +
+            "sentences.")
         let pauseControl = NSStackView(views: [
             continuousPauseField, continuousPauseStepper, pauseHint, pauseHelp
         ])
@@ -1120,14 +1102,9 @@ final class PreferencesWindowController: NSWindowController,
         let maxChunkHint = PreferencesWindowController.makeHint(
             "seconds · default 5.0 · 5-50")
         let maxChunkHelp = HelpButton(text:
-            "Safety limit on chunk length. If you talk non-stop for " +
-            "this long without pausing, the app forces a break anyway " +
-            "and sends what it has to be transcribed.\n\n" +
-            "Prevents the transcription engine from choking on a huge " +
-            "audio clip, and keeps text appearing at a reasonable rate.\n\n" +
-            "Example: with 5 seconds, a long run-on sentence gets cut " +
-            "every five seconds so text keeps flowing to the cursor " +
-            "instead of piling up.")
+            "Maximum length of a single chunk. Continuous speech " +
+            "without a qualifying pause is cut at this duration and " +
+            "sent for transcription.")
         let maxChunkControl = NSStackView(views: [
             continuousMaxChunkField, continuousMaxChunkStepper, maxChunkHint, maxChunkHelp
         ])
@@ -1141,17 +1118,12 @@ final class PreferencesWindowController: NSWindowController,
         let chunkOverlapHint = PreferencesWindowController.makeHint(
             "seconds · default 0.3 · 0-1.5")
         let chunkOverlapHelp = HelpButton(text:
-            "When Max chunk forces a cut in the middle of your speech, " +
-            "keeps the last fraction of a second of audio and feeds it " +
-            "into the next chunk as well. The speech engine then sees " +
-            "the boundary word with full context on at least one side, " +
-            "instead of a clipped fragment on both sides.\n\n" +
-            "The duplicate text that would appear in the next chunk is " +
-            "detected and dropped automatically. If the detection fails, " +
-            "a word or two may appear twice. Set to 0 to disable " +
-            "entirely and keep the original cut-and-resume behavior.\n\n" +
-            "Only affects Max chunk cuts (mid-speech). Natural pause " +
-            "cuts never overlap because they end in silence already.")
+            "Trailing audio preserved across Max chunk cuts and " +
+            "prepended to the next chunk, so the boundary word retains " +
+            "full context on one side.\n\n" +
+            "Duplicate text in the next chunk is removed automatically. " +
+            "When detection fails, a word may appear twice. Set to 0 " +
+            "to disable.")
         let chunkOverlapControl = NSStackView(views: [
             continuousChunkOverlapField, continuousChunkOverlapStepper,
             chunkOverlapHint, chunkOverlapHelp
@@ -1164,17 +1136,12 @@ final class PreferencesWindowController: NSWindowController,
 
         continuousSentencePauseMaxField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let windowThresholdHelp = HelpButton(text:
-            "How long a pause can be before the app treats it as \"you " +
-            "got distracted or stepped away\" rather than the end of a " +
-            "sentence.\n\n" +
-            "Pauses shorter than this but at least as long as Sentence " +
-            "pause start a new sentence (period and capital letter on " +
-            "the next thing you say). Pauses longer than this skip the " +
-            "period and capital, and the next thing you say just " +
-            "continues cleanly as if you were starting fresh.\n\n" +
+            "Maximum pause still treated as a sentence break. Pauses " +
+            "above this value skip the period and capital, so the " +
+            "next phrase continues cleanly.\n\n" +
             "Example: with Sentence pause 1.0 and this set to 2.5, " +
-            "pausing 1 to 2.5 seconds starts a new sentence; pausing " +
-            "longer than 2.5 seconds continues without adding a period.")
+            "pauses between 1.0 and 2.5 seconds start a new sentence; " +
+            "pauses above 2.5 seconds do not.")
         let sentencePauseMaxControl = NSStackView(views: [
             continuousSentencePauseMaxField,
             continuousSentencePauseMaxStepper,
@@ -1191,16 +1158,11 @@ final class PreferencesWindowController: NSWindowController,
         let promptCharsHint = PreferencesWindowController.makeHint(
             "default 200 · 100-900")
         let maxCharsHelp = HelpButton(text:
-            "How much of your previous transcription to pass to the " +
-            "speech engine as context for the next chunk.\n\n" +
-            "More context helps the engine pick between similar-sounding " +
-            "words. If you just said \"I went to the beach,\" the next " +
-            "chunk is more likely to come out as \"sand\" than \"send.\" " +
-            "But more context takes longer to process.\n\n" +
-            "Example: 200 characters is roughly 30 to 40 words, enough " +
-            "to catch the current topic. Raise if words keep being " +
-            "mis-heard despite obvious context; lower if transcription " +
-            "feels sluggish.")
+            "Amount of prior transcription passed to the speech engine " +
+            "as context for the next chunk. Helps the engine choose " +
+            "between similar-sounding words.\n\n" +
+            "Higher = more topical disambiguation, slower.\n" +
+            "Lower = faster, less context.")
         let promptCharsControl = NSStackView(views: [
             continuousPromptChainMaxCharsField, continuousPromptChainMaxCharsStepper,
             promptCharsHint, maxCharsHelp
@@ -1217,35 +1179,22 @@ final class PreferencesWindowController: NSWindowController,
                                         rows: [modelsFolderRow])
         transcriptionModelsFolderSection = modelsFolder
         let stripHelp = HelpButton(text:
-            "When on, the app removes any periods the speech engine " +
-            "wrote and instead decides where sentences end based purely " +
-            "on how long you pause between phrases (using Sentence " +
-            "pause and Window threshold above).\n\n" +
-            "Why: the speech engine sometimes inserts periods in " +
-            "awkward places (lists, mid-phrase pauses, inferred stops). " +
-            "Turning this on gives you cleaner, more predictable " +
-            "results in continuous dictation.\n\n" +
-            "Example: \"I bought milk, eggs, cheese.\" (pause) \"Then " +
-            "went home.\" With this off, the engine's own periods and " +
-            "capitals land wherever it inferred them. With this on, " +
-            "you get \"I bought milk, eggs, cheese. Then went home\" " +
-            "because only your long pause counted as a sentence break.")
+            "Removes periods produced by the speech engine so sentence " +
+            "boundaries are determined solely by pause length " +
+            "(Sentence pause and Window threshold above).\n\n" +
+            "Useful when the engine inserts periods in awkward places, " +
+            "such as lists or mid-phrase pauses.")
         let stripRow = NSStackView(views: [stripWhisperPunctuationCheckbox, stripHelp])
         stripRow.orientation = .horizontal
         stripRow.spacing = 8
         stripRow.alignment = .centerY
 
         let promptChainHelp = HelpButton(text:
-            "When on, the app shows the speech engine what it just " +
-            "transcribed before it works on the next chunk. Gives the " +
-            "engine context so it picks better word spellings.\n\n" +
-            "Example: if you just said \"I went to the beach,\" the " +
-            "engine is more likely to transcribe \"sand\" rather than " +
-            "\"send\" or \"sent\" in the next chunk, because the beach " +
-            "context primed it.\n\n" +
-            "Trade-off: each transcription takes a tiny bit longer and " +
-            "uses a little more memory. For most users the quality " +
-            "improvement is worth it.")
+            "Supplies the just-transcribed text to the engine as " +
+            "context for the next chunk, improving word selection on " +
+            "similar-sounding words.\n\n" +
+            "Example: after \"I went to the beach,\" \"sand\" is more " +
+            "likely than \"send.\"")
         let promptChainRow = NSStackView(views: [continuousPromptChainCheckbox, promptChainHelp])
         promptChainRow.orientation = .horizontal
         promptChainRow.spacing = 8
@@ -1322,16 +1271,13 @@ final class PreferencesWindowController: NSWindowController,
             ["Method:", "Typed delay:", "Trailing period:"])
 
         let methodHelp = HelpButton(text:
-            "How the app actually puts dictated text into the field " +
-            "you're typing in.\n\n" +
-            "Paste: copies the text to your clipboard and pastes it. " +
-            "Fast and reliable in most apps, but it overwrites whatever " +
-            "you had on the clipboard, and a few apps block paste.\n\n" +
-            "Typed: simulates keyboard keystrokes, one character at a " +
-            "time. Slower, but works in apps where paste is unreliable " +
-            "(some terminals, games, sandboxed apps).\n\n" +
-            "Start with Paste. Switch to Typed only if a specific app " +
-            "drops or ignores the pasted text.")
+            "How transcribed text is inserted into the active field.\n\n" +
+            "Paste: copies the text to the clipboard and pastes it. " +
+            "Overwrites current clipboard contents. Some apps block " +
+            "paste.\n\n" +
+            "Typed: simulates keystrokes one at a time. Slower. Works " +
+            "where paste is blocked (some terminals, games, sandboxed " +
+            "apps).")
         let radios = NSStackView(views: [injectionPasteRadio, injectionTypedRadio, methodHelp])
         radios.orientation = .horizontal
         radios.spacing = 16
@@ -1342,14 +1288,9 @@ final class PreferencesWindowController: NSWindowController,
         let delayHint = PreferencesWindowController.makeHint(
             "ms · default 8 · 5-100")
         let delayHelp = HelpButton(text:
-            "Only used when Method is set to Typed. Controls how long " +
-            "the app waits between each simulated keystroke.\n\n" +
-            "Some apps can't keep up with keystrokes fired too fast and " +
-            "will drop characters, producing garbled text. A small " +
-            "delay gives them time to process each one.\n\n" +
-            "Example: if typed output comes out with missing letters, " +
-            "raise this (e.g. 15 or 20 ms). If text is clean, you can " +
-            "lower it to make typing faster.")
+            "Delay between simulated keystrokes. Used only when Method " +
+            "is set to Typed.\n\n" +
+            "Raise if typed output has missing or garbled characters.")
         let delayControl = NSStackView(views: [
             typedDelayField, typedDelayStepper, delayHint, delayHelp
         ])
@@ -1360,16 +1301,11 @@ final class PreferencesWindowController: NSWindowController,
         typedDelayLabel = delayLabelRef
 
         let autoEndHelp = HelpButton(text:
-            "When on, the app ensures every dictation ends with a " +
-            "period. When off, no trailing period is added, even if " +
-            "the speech engine wrote one.\n\n" +
-            "The period doesn't appear instantly. There's a short " +
-            "wait (set by Trailing period below) so you can start " +
-            "another dictation if you weren't actually done. If you " +
-            "press the hotkey during that wait, the period is " +
-            "cancelled and you continue the same sentence.\n\n" +
-            "Exception: sentences that already end with \"?\" or \"!\" " +
-            "stay as-is. The app won't tack a period onto them.")
+            "Appends a period to every dictation that does not already " +
+            "end in \"?\" or \"!\".\n\n" +
+            "The period is inserted after the grace period set by " +
+            "Trailing period below. Starting a new dictation within " +
+            "that window cancels the pending period.")
         let autoEndRow = NSStackView(views: [autoEndPeriodCheckbox, autoEndHelp])
         autoEndRow.orientation = .horizontal
         autoEndRow.spacing = 8
@@ -1377,15 +1313,10 @@ final class PreferencesWindowController: NSWindowController,
 
         continuousTrailingPeriodField.widthAnchor.constraint(equalToConstant: 80).isActive = true
         let trailingPeriodHelp = HelpButton(text:
-            "How long the app waits after your dictation finishes " +
-            "before actually dropping in the trailing period.\n\n" +
-            "This is your grace period. If you press the hotkey within " +
-            "this window to start another dictation, the pending " +
-            "period is cancelled so you can continue the same thought.\n\n" +
-            "Example: with 4.0 seconds, your dictation appears, then 4 " +
-            "seconds later a period is added. If you start dictating " +
-            "again within those 4 seconds, no period appears and the " +
-            "new text joins on cleanly.")
+            "Delay between the end of a dictation and insertion of " +
+            "the trailing period. Pressing the hotkey within this " +
+            "window to start another dictation cancels the pending " +
+            "period.")
         let trailingPeriodControl = NSStackView(views: [
             continuousTrailingPeriodField,
             continuousTrailingPeriodStepper,
@@ -1423,19 +1354,14 @@ final class PreferencesWindowController: NSWindowController,
         let threadsHint = PreferencesWindowController.makeHint(
             PreferencesWindowController.threadsHintString())
         let threadsHelp = HelpButton(text:
-            "How many worker threads the local speech engine runs in " +
-            "parallel while transcribing.\n\n" +
-            "More threads = faster transcription, up to a point. The " +
-            "maximum shown is your Mac's logical processor count. On " +
-            "chips with hyperthreading that's roughly double the " +
-            "physical core count. Running at max will make the rest " +
-            "of your Mac feel sluggish while dictation is being " +
-            "processed.\n\n" +
-            "The recommendation shown next to this field is typically " +
-            "a third to a half of the maximum, which stays responsive. " +
-            "Going higher gives diminishing returns past the physical " +
-            "core count and can get worse on multi-socket machines. " +
-            "Go lower if other apps feel laggy during transcription.")
+            "Number of worker threads the local speech engine runs in " +
+            "parallel during transcription.\n\n" +
+            "Higher = faster, up to a point.\n" +
+            "The maximum is the machine's logical processor count. " +
+            "Running at the maximum makes the rest of the system feel " +
+            "sluggish during transcription.\n\n" +
+            "The recommended value shown next to the field is " +
+            "typically one-third to one-half of the maximum.")
         let threadsControl = NSStackView(views: [
             threadsField, threadsStepper, threadsHint, threadsHelp
         ])
@@ -1449,16 +1375,11 @@ final class PreferencesWindowController: NSWindowController,
         let beamHint = PreferencesWindowController.makeHint(
             "default 3 · 1-10")
         let beamHelp = HelpButton(text:
-            "How many possible word interpretations the speech engine " +
-            "considers at once for each piece of audio.\n\n" +
-            "Higher = more accurate but slower. Lower = faster but the " +
-            "engine commits to its first guess and can miss the right " +
-            "word.\n\n" +
-            "Example: with 1, the engine picks the single most likely " +
-            "word immediately: fastest but prone to hearing \"to\" " +
-            "when you said \"two.\" With 10, it keeps 10 candidates " +
-            "alive and picks the best-fitting one: noticeably slower " +
-            "but catches these distinctions.")
+            "Number of candidate word interpretations the speech " +
+            "engine evaluates per audio segment.\n\n" +
+            "Higher = more accurate, slower.\n" +
+            "Lower = faster, more likely to confuse similar-sounding " +
+            "words (\"to\" for \"two\").")
         let beamControl = NSStackView(views: [
             beamField, beamStepper, beamHint, beamHelp
         ])
@@ -1486,71 +1407,41 @@ final class PreferencesWindowController: NSWindowController,
         resetStack.spacing = 4
 
         let processingRootHelp = HelpButton(text:
-            "Governs whether the app cleans up whisper's raw output " +
-            "before injecting it. When off, whisper's transcript lands " +
-            "in your document exactly as emitted (including any stray " +
-            "annotations like \"[BLANK_AUDIO]\" or \"*cough*\" and " +
-            "whisper's own choices about capitalization).\n\n" +
-            "When on, each of the five passes below runs independently " +
-            "according to its own checkbox. For most users, leave this " +
-            "and all five below on. The granular toggles are useful " +
-            "for debugging or if a specific pass is destroying content " +
-            "you want preserved.")
+            "Parent toggle for the cleanup passes below. When off, " +
+            "whisper's raw output is inserted as-is, including " +
+            "annotations like \"[BLANK_AUDIO]\" and whisper's own " +
+            "capitalization choices.")
 
         let removeAnnotationsHelp = HelpButton(text:
-            "Strips the non-speech markers whisper inserts when audio " +
-            "goes silent or picks up non-speech sound.\n\n" +
-            "Examples of what gets removed: \"[BLANK_AUDIO]\", " +
-            "\"[MUSIC]\", \"(soft music)\", \"(laughter)\", \"*cough*\", " +
-            "\"*laughs*\", leading \">>\" artifacts, and trailing " +
-            "\"...\" that whisper uses to mark a partial phrase.\n\n" +
-            "Turn off only if you're specifically trying to see these " +
-            "markers for debugging.")
+            "Strips non-speech markers whisper inserts for silence or " +
+            "non-speech sound: \"[BLANK_AUDIO]\", \"[MUSIC]\", " +
+            "\"(laughter)\", \"*cough*\", leading \">>\", trailing " +
+            "\"...\".")
 
         let normalizeCapHelp = HelpButton(text:
-            "Lowercases any capital letter that isn't at a sentence " +
-            "start (after a period, question mark, or exclamation " +
-            "mark). Whisper's natural sentence-start capitals are " +
-            "preserved. The pronoun \"i\" and its contractions " +
-            "(\"i'll\", \"i've\", \"i'm\", \"i'd\") are then re-uppercased.\n\n" +
-            "Why: whisper's title-casing and shouty-case tendencies " +
-            "produce text like \"Hello World, This Is A Test\" that " +
-            "most users don't want. This folds everything to clean " +
-            "sentence case.\n\n" +
-            "Turn off if you want whisper's casing preserved as-is " +
-            "(e.g. for code dictation where capitalization matters).")
+            "Lowercases capital letters that are not at a sentence " +
+            "start. Sentence-start capitals are preserved, and the " +
+            "pronoun \"i\" with its contractions is re-uppercased.\n\n" +
+            "Turn off to preserve whisper's casing as-is, for example " +
+            "when dictating code.")
 
         let fixupsHelp = HelpButton(text:
-            "After capitalization is normalized, this re-raises known " +
-            "proper nouns and brand names to their canonical form.\n\n" +
-            "Examples: \"john\" becomes \"John\", \"toronto\" becomes " +
-            "\"Toronto\", \"node.js\" becomes \"Node.js\", \"macos\" " +
-            "becomes \"macOS\". Covers common first and last names, " +
-            "major cities, US states and capitals, Canadian provinces " +
-            "and capitals, and tech brand names.\n\n" +
-            "Turn off if the hardcoded list is causing unwanted " +
-            "rewrites for your use case.")
+            "Re-capitalizes known proper nouns and brand names after " +
+            "normalization (\"john\" to \"John\", \"macos\" to " +
+            "\"macOS\").\n\n" +
+            "Covers common names, major cities, US states, Canadian " +
+            "provinces, and tech brands.")
 
         let substitutionsHelp = HelpButton(text:
-            "Rewrites spoken forms to their canonical capitalized " +
-            "abbreviations and multi-word brand names.\n\n" +
-            "Examples: \"megabytes\" becomes \"MB\", \"kilobytes\" " +
-            "becomes \"KB\", \"mac os\" becomes \"macOS\", \"st johns\" " +
-            "becomes \"St. John's\". Covers unit shortforms and " +
-            "multi-word names that the single-word Capitalize nouns " +
-            "pass can't handle.\n\n" +
-            "Turn off if you want the spoken form preserved verbatim.")
+            "Rewrites spoken forms to canonical capitalized " +
+            "abbreviations and multi-word brand names (\"megabytes\" " +
+            "to \"MB\", \"mac os\" to \"macOS\").")
 
         let firstLetterHelp = HelpButton(text:
-            "In standard (non-continuous) dictation only. When the " +
-            "cursor is at the start of a line (empty field, or " +
-            "immediately after Enter), the first letter of the " +
-            "dictated text is capitalized.\n\n" +
-            "When the cursor is mid-line (inline dictation), the " +
-            "first letter stays lowercase so your dictation joins " +
-            "cleanly onto existing text.\n\n" +
-            "Turn off if you prefer whisper's own first-letter " +
-            "decision to stand regardless of cursor position.")
+            "Standard (non-continuous) dictation only. Capitalizes " +
+            "the first letter when the cursor is at the start of a " +
+            "line. Leaves it lowercase mid-line so inline dictation " +
+            "joins cleanly.")
 
         let processingRootRow = NSStackView(views: [
             transcriptProcessingCheckbox, processingRootHelp
@@ -1572,17 +1463,10 @@ final class PreferencesWindowController: NSWindowController,
             views: [capitalizeFirstLetterCheckbox, firstLetterHelp], indent: indent)
 
         let filterDuplicatesHelp = HelpButton(text:
-            "Collapses the second of any two identical words that appear " +
-            "right next to each other, separated only by a space.\n\n" +
-            "Common cases this catches: speech-engine stutters (\"I I " +
-            "think\" becomes \"I think\"), repeated short words whisper " +
-            "sometimes doubles, and duplicate words that leak through the " +
-            "chunk-overlap boundary when whisper transcribes the overlapped " +
-            "audio slightly differently in the two chunks.\n\n" +
-            "Not collapsed: words separated by punctuation (\"very, very " +
-            "good\" stays intact because the comma signals deliberate " +
-            "emphasis). Also not collapsed: words that differ in any way, " +
-            "including casing of the alphanumeric part.")
+            "Collapses adjacent identical words separated only by a " +
+            "space (\"I I think\" to \"I think\").\n\n" +
+            "Words separated by punctuation are left intact " +
+            "(\"very, very good\").")
         let filterDuplicatesRow = makeIndentedRow(
             views: [filterDuplicatesCheckbox, filterDuplicatesHelp], indent: indent)
 
@@ -1626,9 +1510,9 @@ final class PreferencesWindowController: NSWindowController,
 
         let autoCheckHelp = HelpButton(text:
             "Runs a background check for new releases on GitHub. " +
-            "Nothing downloads automatically; a new release updates " +
-            "the menu-bar icon badge so you can start the download " +
-            "yourself from the About tab.")
+            "Nothing downloads automatically. A new release updates " +
+            "the menu-bar icon badge; the download is started " +
+            "manually from the About tab.")
         let autoCheckRow = NSStackView(views: [autoUpdateCheckbox, autoCheckHelp])
         autoCheckRow.orientation = .horizontal
         autoCheckRow.alignment = .centerY
@@ -2106,7 +1990,6 @@ final class PreferencesWindowController: NSWindowController,
 
     private func refreshAll() {
         refreshHotkeyButton()
-        hotkeyStatusLabel.stringValue = ""
         refreshBackendPopup()
         refreshModelPopup()
         refreshInjectionPopup()
@@ -2199,6 +2082,12 @@ final class PreferencesWindowController: NSWindowController,
             keyCode: prefs.hotkeyKeyCode,
             flags: prefs.hotkeyModifierFlags
         )
+        if !isRecordingHotkey {
+            hotkeyStatusLabel.stringValue = PreferencesWindowController.describeVerbose(
+                keyCode: prefs.hotkeyKeyCode,
+                flags: prefs.hotkeyModifierFlags
+            )
+        }
     }
 
     private func refreshBackendPopup() {
@@ -2409,7 +2298,7 @@ final class PreferencesWindowController: NSWindowController,
         let logical = ProcessInfo.processInfo.activeProcessorCount
         let low = max(1, logical / 3)
         let high = max(low, logical / 2)
-        let range = low == high ? "\(low)" : "\(low)–\(high)"
+        let range = low == high ? "\(low)" : "\(low)-\(high)"
         return "Max: \(logical) · Recommended: \(range)"
     }
 
@@ -3263,7 +3152,6 @@ final class PreferencesWindowController: NSWindowController,
         if isRecordingHotkey {
             stopRecordingHotkey()
             refreshHotkeyButton()
-            hotkeyStatusLabel.stringValue = ""
         } else {
             startRecordingHotkey()
         }
@@ -3289,7 +3177,6 @@ final class PreferencesWindowController: NSWindowController,
                 if event.keyCode == 53 {
                     self.stopRecordingHotkey()
                     self.refreshHotkeyButton()
-                    self.hotkeyStatusLabel.stringValue = "Cancelled."
                     return nil
                 }
                 let keyCode = Int(event.keyCode)
@@ -3305,7 +3192,6 @@ final class PreferencesWindowController: NSWindowController,
                 Preferences.shared.hotkeyModifierFlags = flags
                 self.stopRecordingHotkey()
                 self.refreshHotkeyButton()
-                self.hotkeyStatusLabel.stringValue = "Saved."
                 self.onHotkeyChanged?()
                 return nil
             }
@@ -3350,6 +3236,18 @@ final class PreferencesWindowController: NSWindowController,
         if flags.contains(.maskCommand)   { parts.append("⌘") }
         parts.append(keyName(for: keyCode))
         return parts.joined()
+    }
+
+    // Spelled-out variant used where symbols aren't self-explanatory (menu-bar
+    // tooltip, hotkey status label). Example: "Control+Option+Space".
+    static func describeVerbose(keyCode: Int, flags: CGEventFlags) -> String {
+        var parts: [String] = []
+        if flags.contains(.maskControl)   { parts.append("Control") }
+        if flags.contains(.maskAlternate) { parts.append("Option") }
+        if flags.contains(.maskShift)     { parts.append("Shift") }
+        if flags.contains(.maskCommand)   { parts.append("Command") }
+        parts.append(keyName(for: keyCode))
+        return parts.joined(separator: "+")
     }
 
     private static func keyName(for keyCode: Int) -> String {

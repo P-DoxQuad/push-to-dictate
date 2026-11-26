@@ -1440,3 +1440,35 @@ New Preferences tab between Advanced and About.
 Table dispatch in the existing data source: `numberOfRows` and `viewFor tableColumn:row:` branch on `tableView === releasesTable` vs the sidebar. `tableViewSelectionDidChange` branches similarly and calls `updateReleasesActionButtons` to enable/disable the action buttons based on selection and asset availability.
 
 All three new prefs added to `allUserDefaultsKeys` so they round-trip through Export/Import.
+
+#### Microcopy pass: Preferences help popovers, Help window, Accessibility dialog
+
+All user-facing descriptive strings rewritten for a consistent third-person, declarative register. No second-person pronouns anywhere. No em-dashes. Directional guidance (`Higher = ..., Lower = ...`) retained per the UI copy rules; recommendations and selling-point language removed.
+
+**Preferences help popovers.** All 25 `HelpButton` texts tightened. The "Still being refined" paragraph in the continuous-dictation help is gone; replaced with a single `Experimental.` lead line. Belabored walkthroughs (Strip punctuation example, Accuracy "at 1 the engine picks..." paragraph, hardcoded-list warnings on the fixup passes) removed. Each popover now has the shape: one-sentence definition, optional directional pair, one example only when it clarifies something non-obvious.
+
+**Accessibility request window.** Body text and the granted-state status strings rewritten in third-person. "You're all set." → "Setup complete." Stray em-dash in an internal comment removed.
+
+**Threads-hint range display.** The recommended-threads range next to the `Transcription threads` field used an en-dash (`1–4`); changed to a regular hyphen to match the rest of the UI and the no-em-dash rule.
+
+#### Help window: full rewrite with inline formatting
+
+Content rewritten end-to-end in formal English with full sentences. Every tunable setting now carries its default and range inline (Sentence pause default 1.0 seconds, Max chunk default 5.0 seconds range 5 to 50, Chunk overlap default 0.3 seconds range 0 to 1.5, Silence level default 0.0100, Silence duration default 4.0 seconds, Trailing period default 4.0 seconds, Typed delay default 8 milliseconds range 5 to 100, Accuracy default 3 range 1 to 10). Transcript Processing section removed from the help window entirely; those passes are power-user territory already covered by the Preferences help icons.
+
+**Inline formatting added.** New `renderInlines` parser applies bold to `**bold**` markers and monospace to `` `code` `` markers at render time. Used throughout the body for setting names, button labels, checkbox titles, mode names, file paths, and filenames. Unmatched markers are left as literal characters.
+
+**Bulleted lists.** New `append(bullet:)` helper emits a hanging-indented list item (`firstLineHeadIndent = 4`, `headIndent = 22`) so wrapped lines align under the text, not under the bullet glyph. Used for enumerable items: the four continuous-dictation parameters, the two silence-detection settings, the two backend options, the two text-insertion methods, the two performance settings, the two diagnostic options.
+
+**Annotation helper.** `append(annotation:)` emits a short bold line used for the `Experimental.` tag at the top of the Continuous dictation section.
+
+**Rendering fix.** Body paragraphs no longer separated by `\n\n`. Each body call is a single paragraph; vertical spacing comes from `paragraphSpacing = 10` on the paragraph style. Empty paragraphs (what `\n\n` produced) were the suspected cause of a specific-paragraph rendering glitch in the Continuous dictation section; the single-newline + paragraphSpacing form avoids them entirely.
+
+**Content refresh on show.** The text view's attributed content is rebuilt each time `show()` is called, so a changed hotkey or any dynamic field is reflected without needing an app restart. `Current hotkey:` label used instead of `Default hotkey:`, since the function returns the user's bound hotkey, not the compiled-in default.
+
+#### Hotkey verbose names
+
+`describeVerbose(keyCode:flags:)` added to `PreferencesWindowController`. Returns spelled-out form (`Control+Option+Space`) alongside the existing symbolic form (`⌃⌥Space`). Used where symbols aren't self-explanatory.
+
+- **Menu-bar tooltip** now reads `Push to Dictate\nHotkey: Control+Option+Space`, refreshed via `refreshMenuBarToolTip()` from `applyHotkeySettings()` so it updates immediately when the hotkey is rebound.
+- **Preferences hotkey row** status label now shows the verbose current hotkey when idle (populated by `refreshHotkeyButton`). Transient `Saved.` / `Cancelled.` / clear overrides removed; the verbose name is the confirmation itself, alongside the symbolic form on the button.
+- **Modifier legend caption** added under the hotkey row in Preferences → General → Startup & Shortcut: `Modifiers: ⌃ Control, ⌥ Option, ⇧ Shift, ⌘ Command.` Point-of-use placement replaces an earlier attempt to put the legend in the Help window body, which was disjointed.

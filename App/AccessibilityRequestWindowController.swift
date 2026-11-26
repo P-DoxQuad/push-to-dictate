@@ -65,13 +65,13 @@ final class AccessibilityRequestWindowController: NSWindowController, NSWindowDe
         bodyLabel.cell?.isScrollable = false
         bodyLabel.preferredMaxLayoutWidth = 420
         bodyLabel.alignment = .center
-        bodyLabel.stringValue = "Push to Dictate needs Accessibility access to listen for its "
+        bodyLabel.stringValue = "Push to Dictate requires Accessibility access to receive its "
             + "global hotkey and to insert transcribed text into other apps.\n\n"
-            + "Open System Preferences and search for Push to Dictate in the Accessibility list. "
-            + "Then check the box.\n\n"
-            + "If Push to Dictate already appears but access isn't taking effect, "
-            + "select the entry and click "
-            + "the minus button to remove it, followed by clicking the plus button to add the entry again."
+            + "Open System Preferences, locate Push to Dictate in the Accessibility list, and "
+            + "check the box.\n\n"
+            + "If the entry is already present but access is not taking effect, select the "
+            + "entry, click the minus button to remove it, then click the plus button to add "
+            + "it again."
 
         primaryButton.bezelStyle = .rounded
         primaryButton.title = "Open Accessibility Preferences"
@@ -135,8 +135,8 @@ final class AccessibilityRequestWindowController: NSWindowController, NSWindowDe
     }
 
     private func showGrantedState() {
-        statusLabel.stringValue = "You're all set."
-        bodyLabel.stringValue = "Accessibility access was granted. The hotkey is active."
+        statusLabel.stringValue = "Setup complete."
+        bodyLabel.stringValue = "Accessibility access granted. The hotkey is active."
         primaryButton.title = "Done"
         primaryButton.action = #selector(dismiss)
         secondaryButton.isHidden = true
@@ -176,7 +176,7 @@ final class AccessibilityRequestWindowController: NSWindowController, NSWindowDe
     // red traffic-light close button. Without this, closing via the red X
     // would leave `active` non-nil and `onMenuShouldRefresh` uncalled, so the
     // status menu's "Grant Accessibility Access…" item would stay hidden
-    // despite permission still being missing — stale state with no path
+    // despite permission still being missing: stale state with no path
     // back to the prompt.
     func windowWillClose(_ notification: Notification) {
         stopPolling()

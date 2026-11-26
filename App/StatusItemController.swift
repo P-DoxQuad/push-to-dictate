@@ -112,7 +112,15 @@ final class StatusItemController: NSObject,
         guard let button = statusItem.button else { return }
         button.image = currentMenuBarImage()
         button.imageScaling = .scaleProportionallyDown
-        button.toolTip = "Push to Dictate"
+        refreshMenuBarToolTip()
+    }
+
+    private func refreshMenuBarToolTip() {
+        let prefs = Preferences.shared
+        let verbose = PreferencesWindowController.describeVerbose(
+            keyCode: prefs.hotkeyKeyCode,
+            flags: prefs.hotkeyModifierFlags)
+        statusItem.button?.toolTip = "Push to Dictate\nHotkey: \(verbose)"
     }
 
     func refreshMenuBarIcon() {
@@ -406,6 +414,7 @@ final class StatusItemController: NSObject,
         hotkeyMonitor.modifierFlags = prefs.hotkeyModifierFlags
         hotkeyMonitor.mode = (prefs.hotkeyMode == .pushToTalk) ? .pushToTalk : .toggle
         refreshToggleMenuItemTitle()
+        refreshMenuBarToolTip()
     }
 
     private func refreshToggleMenuItemTitle() {
