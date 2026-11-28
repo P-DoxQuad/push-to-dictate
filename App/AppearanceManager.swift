@@ -25,6 +25,12 @@ final class AppearanceManager: NSObject {
     // can find them on appearance change and update their layer tint.
     static let sectionBoxIdentifier = NSUserInterfaceItemIdentifier("PQSectionBox")
 
+    // View identifier used to mark NSTextFields whose `textColor` is
+    // managed by their owner (e.g. the model rows' speed/best-pick
+    // coloring). The applyTextColors walker skips any field tagged with
+    // this identifier so the owner's color sticks.
+    static let customColorIdentifier = NSUserInterfaceItemIdentifier("PQCustomColor")
+
     private var isObservingAppearance = false
 
     private override init() {
@@ -184,11 +190,15 @@ final class AppearanceManager: NSObject {
             if let tf = sub as? NSTextField, !tf.isEditable {
                 // Only override non-editable labels/captions/hints. Editable
                 // fields keep their native textColor so typed text stays
-                // legible.
-                let isSecondary =
-                    (tf.textColor == NSColor.secondaryLabelColor)
-                    || (tf.font?.pointSize == 11)
-                tf.textColor = isSecondary ? secondary : primary
+                // legible. Fields tagged with the custom-color identifier
+                // are managed by their owner (e.g. speed-rated model
+                // rows) and we leave them alone.
+                if tf.identifier != AppearanceManager.customColorIdentifier {
+                    let isSecondary =
+                        (tf.textColor == NSColor.secondaryLabelColor)
+                        || (tf.font?.pointSize == 11)
+                    tf.textColor = isSecondary ? secondary : primary
+                }
             }
             applyTextColors(sub, mode: mode)
         }

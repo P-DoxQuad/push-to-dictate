@@ -113,9 +113,14 @@ final class ManageModelsWindowController: NSWindowController {
         let customBox = ManageModelsWindowController.makeSectionBox()
         let customInner = ManageModelsWindowController.innerStack(in: customBox)
         customInner.addArrangedSubview(scroll)
+        // Width must leave room for the stack's left + right edgeInsets
+        // (14 + 14 = 28). Pinning scroll to customInner.width would
+        // force autolayout to zero the leading inset, which is what
+        // was eating the left padding on custom rows.
         NSLayoutConstraint.activate([
             scroll.heightAnchor.constraint(equalToConstant: 240),
-            scroll.widthAnchor.constraint(equalTo: customInner.widthAnchor),
+            scroll.widthAnchor.constraint(equalTo: customInner.widthAnchor,
+                                          constant: -28),
             flipped.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)
         ])
         outer.addArrangedSubview(customBox)
@@ -172,6 +177,27 @@ final class ManageModelsWindowController: NSWindowController {
             rowViews[entry.filename]?.refreshStatus()
         }
         rebuildExtrasSection()
+        refreshBestPickMarker()
+    }
+
+    // Determines the single best-pick filename across every model
+    // present on disk (bundled catalog entries, downloaded catalog
+    // entries, and custom downloads) and marks exactly one row.
+    private func refreshBestPickMarker() {
+        var present: [String] = []
+        for entry in ModelCatalog.entries {
+            if entry.isBundled {
+                present.append(entry.filename)
+                continue
+            }
+            if case .downloaded = ModelLocator.status(for: entry.filename) {
+                present.append(entry.filename)
+            }
+        }
+        present.append(contentsOf: extraRowViews.keys)
+        let best = ModelRecommendation.bestPickFilename(among: present)
+        for (fn, row) in rowViews { row.setBestPick(fn == best) }
+        for (fn, row) in extraRowViews { row.setBestPick(fn == best) }
     }
 
     private func rebuildExtrasSection() {
@@ -194,7 +220,6 @@ final class ManageModelsWindowController: NSWindowController {
                                      sizeBytes: size,
                                      url: nil,
                                      isBundled: false,
-                                     minTier: .veryLow,
                                      isCustom: true)
             let row = ModelRowView(entry: entry)
             row.onDelete = { [weak self] in self?.deleteExtra(filename: filename) }
@@ -435,6 +460,7 @@ private final class ModelRowView: NSView {
     }()
 
     private weak var activeDownloader: ModelDownloader?
+    private var isBestPick: Bool = false
 
     var onDownload: (() -> Void)?
     var onDelete: (() -> Void)?
@@ -451,9 +477,34 @@ private final class ModelRowView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    // Called by the controller after all rows have been refreshed and
+    // the global best-pick filename is known. Marks the single best-fit
+    // row by prefixing the name with a blue star and colouring the name
+    // in blue.
+    func setBestPick(_ isBest: Bool) {
+        isBestPick = isBest
+        refreshNameLabel()
+    }
+
+    private func refreshNameLabel() {
+        let prefix = isBestPick ? "\u{2605} " : ""
+        nameLabel.stringValue = prefix + entry.displayName
+        if isBestPick {
+            nameLabel.textColor = .systemBlue
+        } else {
+            let rec = ModelRecommendation.rate(filename: entry.filename,
+                                               sizeBytes: entry.sizeBytes)
+            nameLabel.textColor = rec.color
+        }
+    }
+
     private func setupSubviews() {
         nameLabel.stringValue = entry.displayName
         nameLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        // Tagged so the AppearanceManager text-color walker leaves us
+        // alone — we manage these two by speed rating / best-pick.
+        nameLabel.identifier = AppearanceManager.customColorIdentifier
+        statusLabel.identifier = AppearanceManager.customColorIdentifier
         sizeLabel.stringValue = ModelCatalog.formatBytes(entry.sizeBytes)
         sizeLabel.textColor = .labelColor
         statusLabel.textColor = .labelColor
@@ -531,21 +582,26 @@ private final class ModelRowView: NSView {
 
         let isActive = (entry.filename == Preferences.shared.localModelFilename)
 
+        // Every row gets a colored recommendation (catalog, bundled, or
+        // custom-downloaded). Rating is computed from the filename-
+        // parsed family + quant and the current host's capability
+        // (physical cores, SIMD, arch, thread setting); falls back to a
+        // size-derived estimate when the filename doesn't match a
+        // standard pattern.
+        let rec = ModelRecommendation.rate(filename: entry.filename,
+                                           sizeBytes: entry.sizeBytes)
+        statusDot.isHidden = false
+        statusDot.fillColor = rec.color
+        statusLabel.stringValue = rec.label
+        statusLabel.textColor = rec.color
+        refreshNameLabel()
+
         if entry.isCustom {
-            statusLabel.stringValue = "Downloaded"
-            statusLabel.textColor = .labelColor
             actionButton.title = "Delete"
             actionButton.isEnabled = true
             configureUseButton(available: true, isActive: isActive)
             return
         }
-
-        // Every catalog entry (bundled or not) gets a colored recommendation.
-        let rec = ModelRecommendation.rate(minTier: entry.minTier)
-        statusDot.isHidden = false
-        statusDot.fillColor = rec.color
-        statusLabel.stringValue = rec.label
-        statusLabel.textColor = rec.color
 
         if entry.isBundled {
             actionButton.title = "-"

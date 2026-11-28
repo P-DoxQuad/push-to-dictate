@@ -2095,6 +2095,10 @@ final class PreferencesWindowController: NSWindowController,
         modelPopup.isEnabled = true
         for name in models {
             modelPopup.addItem(withTitle: name)
+            // Stash the clean filename on the item so subsequent style
+            // passes don't have to guess what the title was before we
+            // decorated it.
+            modelPopup.lastItem?.representedObject = name
         }
         let current = Preferences.shared.localModelFilename
         if models.contains(current) {
@@ -2104,13 +2108,24 @@ final class PreferencesWindowController: NSWindowController,
     }
 
     private func applyModelPopupColor() {
-        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let regular = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        // Read filenames from representedObject so titles mutated by
+        // prior calls don't poison the best-pick input list.
+        let presentFilenames = modelPopup.itemArray.compactMap { $0.representedObject as? String }
+        let bestPick = ModelRecommendation.bestPickFilename(among: presentFilenames)
         for item in modelPopup.itemArray {
-            let color = ModelCatalog.color(forFilename: item.title) ?? .labelColor
+            let filename = (item.representedObject as? String) ?? item.title
+            let isBest = (filename == bestPick)
+            // Best pick: star + filename, both in the same blue used by
+            // the Manage Models best-pick marker. Otherwise: filename in
+            // its speed-rating color.
+            let color: NSColor = isBest
+                ? .systemBlue
+                : (ModelCatalog.color(forFilename: filename) ?? .labelColor)
+            let display = (isBest ? "\u{2605} " : "") + filename
             item.attributedTitle = NSAttributedString(
-                string: item.title,
-                attributes: [.foregroundColor: color, .font: font]
-            )
+                string: display,
+                attributes: [.foregroundColor: color, .font: regular])
         }
     }
 
@@ -2358,6 +2373,15 @@ final class PreferencesWindowController: NSWindowController,
         let value = threadsStepper.integerValue
         threadsField.integerValue = value
         Preferences.shared.transcriptionThreads = value
+        refreshModelRatingsAfterThreadChange()
+    }
+
+    // Thread count is one of the inputs to the model recommendation
+    // score. When it changes, the model popup's color and any open
+    // Manage Models window's badges need to re-rate.
+    private func refreshModelRatingsAfterThreadChange() {
+        applyModelPopupColor()
+        manageModelsController?.refreshAll()
     }
 
     @objc private func beamStepperChanged() {
@@ -2902,6 +2926,7 @@ final class PreferencesWindowController: NSWindowController,
                 threadsStepper.integerValue = v
                 Preferences.shared.transcriptionThreads = v
                 setNumericFieldValid(field: threadsField, label: threadsLabel, valid: true)
+                refreshModelRatingsAfterThreadChange()
             } else {
                 setNumericFieldValid(field: threadsField, label: threadsLabel, valid: false)
             }

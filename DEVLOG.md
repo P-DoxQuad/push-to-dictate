@@ -1535,3 +1535,30 @@ Added `StatusItemController.joinAndAfterPeriod(_:)` using `NSRegularExpression` 
 #### Transcript Processing: hide proper-noun and duplicate-filter toggles
 
 Removed the user-facing **Capitalize nouns** and **Filter consecutive duplicate words** checkboxes from Preferences → Advanced → Transcript Processing. Both passes still run — unconditionally when the parent **Apply transcript processing** is on, and not at all when it's off. Deleted `applyProperNounFixups` and `filterConsecutiveDuplicates` from `Preferences` (property, `Key` entry, `allUserDefaultsKeys` entry). Removed the matching checkbox declarations, help popovers, row layout, `refreshAll` state restoration, parent-enable toggling, and action handlers from `PreferencesWindowController`. In `StatusItemController`, the per-pref gating on each pass was dropped; the parent-toggle check at the top of `postProcessTranscript` (and surrounding the continuous-mode duplicate + join-and blocks) is the sole gate.
+
+#### Model recommendation: filename-parsed rating + best-pick marker
+
+Replaced the per-entry `minTier` recommendation with a computed rating that works for every model present on disk, catalog or custom.
+
+`ModelDescriptor.parse(filename:)` extracts family (tiny/base/small/medium/large) and quantization (q4/q5/q6/q8/f16) from a `ggml-*.bin` name. Model cost = `family.weight × quant.weight`. Family weights match whisper.cpp throughput ratios (tiny=1, base=2.5, small=7, medium=22, large=45); quant weights are narrow (Q4=0.50, Q8=0.65) because real Q4-vs-Q8 whisper speed delta is ~25%, not 2x.
+
+`HostCapabilities.currentCapability(threads:)` composes `effective_threads × simd_factor × arch_factor`. `physicalCores` comes from `hw.physicalcpu` so hyperthreads don't inflate the score. `isARM64` detected via `sysctlbyname("hw.machine")` (two-call size-then-bytes pattern; the earlier `uname` + tuple-pointer approach tripped the Swift exclusive-access rule).
+
+`ModelRecommendation.rate(filename:sizeBytes:threads:)` buckets speed_score into fixed thresholds: ≤0.4 Fast, ≤1.5 Slow, >1.5 Not Recommended. Thresholds are absolute (not host-tier-dependent) because "feels fast for dictation" is an absolute UX question. Labels: `Fast` (green), `Slow` (orange), `Not recommended` (red). Fallback for unparseable filenames: size-based estimate.
+
+`ModelRecommendation.bestPickFilename(among:threads:)` picks the single best model for the current host. Among Fast candidates, prefers larger family, then lower quant within the family (no Q8-over-Q4 bias — dictation accuracy difference is negligible for clean speech). Final tiebreak is lexicographic filename so popup and Manage Models always agree when models tie on cost. If nothing scores Fast, falls back to the lowest-cost candidate (least painful on weak hardware).
+
+`bestRecommendedPresent()` now routes through `bestPickFilename`. Auto-select at first launch unchanged: `AppDelegate` still gates on `didAutoSelectModel`, so user's model choice after first launch is never overridden.
+
+Live refresh on thread change wired via `refreshModelRatingsAfterThreadChange()` in both stepper and typed-field handlers. Model popup repaints its best-pick marker and colors; an open Manage Models sheet re-rates every row and moves the best-pick highlight.
+
+**Visual treatment.** Two decoupled layers:
+
+- **Speed color** is applied to the model name itself and to the status dot + label. Each row's name text takes its speed color (green / orange / red). Honest: color reports hardware reality, not opinion.
+- **Best-pick marker** is a `★ ` prefix on the name + name text in `systemBlue`, overriding the speed color. Same treatment in both Manage Models rows and the Transcription popup items. No chip, no extra column, no row-shift when the marker toggles.
+
+`AppearanceManager.customColorIdentifier` added so the text-color walker skips fields whose owner manages its own color. `ModelRowView` tags `nameLabel` and `statusLabel` with this identifier; otherwise the appearance pass would clobber the speed/best-pick colors on every window open and every mode change.
+
+**Manage Models layout.** The scroll view inside the custom-models section had `widthAnchor = customInner.widthAnchor`, which forced AutoLayout to zero the stack view's `edgeInsets.left` to resolve the conflict. Changed to `customInner.widthAnchor - 28` (both insets). Custom rows now line up with catalog rows at the same 14pt indent from the section box.
+
+Also: custom rows now show the computed rating (previously showed a plain "Downloaded" label). Removed the per-entry `minTier` from `CatalogModel` and the `HardwareTier` enum entirely; nothing referenced them after the rewrite.
